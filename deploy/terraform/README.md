@@ -91,3 +91,9 @@ integration evaluator through the public URL. Record the host, deployed image
 digest, and a successful requester verification using a real journal PDF with a
 reworded claim in the authorized deployment's evidence. A local hosted-mode test
 does not prove public DNS, certificate, load-balancer, or Azure connectivity.
+
+The [real-journal verification guide](../../docs/real-journal-verification-2026-10-30.md)
+provides a checked publisher PDF, reworded claim, source hash, and a reusable
+`evals/live_journal_verification.py --base-url https://<host>` command for that
+final requester test. Its existing local evidence is explicitly separate from
+production verification.

@@ -1,0 +1,115 @@
+{
+  "verified_at": "2026-10-30T19:31:38.425904+00:00",
+  "execution": {
+    "scope": "isolated-loopback",
+    "entry_point": "http://127.0.0.1:47695",
+    "synthetic_fixture": false,
+    "storage_scope": "temporary SQLite/local artifacts",
+    "cloud_deployment_performed": false
+  },
+  "source": {
+    "url": "https://pubmed.ncbi.nlm.nih.gov/16060722/",
+    "filename": "ioannidis-2005.pdf",
+    "sha256": "ffc1005680cb620eec4c913437dfabbf311b535cfe16cbaeb2faec1f92afc362",
+    "bytes": 255629
+  },
+  "claim": "Within the paper's framework, research findings are less likely to be true in fields where studies are smaller.",
+  "claim_is_verbatim_pdf_span": false,
+  "authentication": {
+    "role": "requester",
+    "health_status": 200,
+    "tokenless_cams_status": 401
+  },
+  "pdf_validation": {
+    "page": 2,
+    "bounding_box_in_page": true,
+    "quote_matches_pdf_rectangle": true,
+    "page_count": 6
+  },
+  "result": {
+    "job_id": "integration_796ace9595264a6eaa672f6cbe7180cc",
+    "claim_id": "clm_integration_796ace9595264a6eaa672f6cbe7180cc_1",
+    "anchor": {
+      "page": 2,
+      "boundingBox": {
+        "x": 45.0,
+        "y": 63.57,
+        "width": 33.790000000000006,
+        "height": 17.270000000000003
+      },
+      "verdict": "supported",
+      "verifiedBy": "gemini-3.1-pro-preview+pymupdf",
+      "verifiedAt": "2026-10-30T19:31:38.371928Z",
+      "verbatimQuote": "Research \nFinding"
+    },
+    "coordinateSpace": "pdf_points",
+    "pageDimensions": {
+      "width": 594.0,
+      "height": 783.0
+    },
+    "telemetry_receipts": [
+      {
+        "claim_id": "clm_integration_796ace9595264a6eaa672f6cbe7180cc_1",
+        "effective_model": "gemini-3.1-pro-preview",
+        "transport": "generate_content",
+        "service_tier": "standard",
+        "zero_data_retention": true,
+        "zdr_attestation": "provider_request_configured",
+        "verification_mode": "live_sdk_execution",
+        "cached_content": "cachedContents/s019yx9blrki3tljz9mhii0hubue7upuqib19wa7",
+        "used_live_sdk": true,
+        "interaction_id": "int_d71216d27778",
+        "timestamp_iso": "2026-10-30T19:31:38.369817+00:00"
+      }
+    ]
+  },
+  "router_telemetry_log": [
+    {
+      "model": "gemini-3.5-flash-lite",
+      "effective_model": "gemini-3.5-flash-lite",
+      "task_type": "cv08_pv_gate",
+      "service_tier": "standard",
+      "used_live_sdk": true,
+      "transport_mode": "generate_content",
+      "cached_content": null,
+      "previous_interaction_id": null,
+      "interaction_id": "int_e9faaaadeba7"
+    },
+    {
+      "model": "gemini-4-argon",
+      "effective_model": "gemini-3.1-pro-preview",
+      "task_type": "claim_verification",
+      "service_tier": "standard",
+      "used_live_sdk": true,
+      "transport_mode": "generate_content",
+      "cached_content": "cachedContents/s019yx9blrki3tljz9mhii0hubue7upuqib19wa7",
+      "previous_interaction_id": null,
+      "interaction_id": "int_d71216d27778"
+    }
+  ],
+  "source_sha256": {
+    "evals/live_journal_verification.py": "12624e60d4326f232345464d2e01d56695a1e4e13a5d170649b92e865aec419f",
+    "backend/__init__.py": "1044ee2f109dfffe8f2d254724a6aee6ae2a676e74284270c7d8cb1a7539c478",
+    "backend/agent/__init__.py": "5d015742b9df420a8b8d440da761c50e216936debb3d29c6e682dcf0658d7490",
+    "backend/agent/gemini_gateway.py": "213c61d875e295c38d887c4e3abddf5d1833a124093dad77a40dd027f67d7a6f",
+    "backend/agent/mlr_genie_agent.py": "6fe64be0af4ef015e34998cda070b7c6868df4e08d87a6174b8c56dd632e35c9",
+    "backend/agent/models_router.py": "ff929b77fbe2b03830ad0439bb60baf1061b2d8971f8d957b25edebe0adf1fcd",
+    "backend/artifact_storage.py": "7d3aac1a1f8394a3d82114908bd18cf27caf0264b10c7d73c20971ea5f68e53b",
+    "backend/config.py": "4663f5a382a33a85f1d3eef3ed16614c0ae7bd9878c9013b1227f1b6709ab460",
+    "backend/document_engine.py": "91f1cfeb65b30156924d8ba5217d9be22c887867926bb967b71afb7bddae38a5",
+    "backend/domain/__init__.py": "c1e14862e5721fb64e74f1af8a444de1eba8ebc605ca6ff34a9f446d9a14a2f7",
+    "backend/domain/assessments.py": "0203596adb37a3872142611f03ed3db9aa6ea7890c250a520f508457d76901fd",
+    "backend/domain/integrations.py": "7dd342319f30d94944dcf044752bbd36e9f702394b689ef2ec96903c3891a906",
+    "backend/domain/schemas.py": "dbc2ca5360097378c70e696aadb0ff54b3d68d93fb1541e912cf943f5e40c13c",
+    "backend/integrations.py": "b7512d1efde09c88b94501434524cfa0527c1a1bd3ad11ff01b4a3401071ffcb",
+    "backend/main.py": "f92a2722b2b036270258a380dac88341e68a2a8a62884959de0fa29001db47d9",
+    "backend/postgres_storage.py": "782c1ce3f57b0e0bea47b32ac101d2a054e8270036336240dd820b1dd6244c13",
+    "backend/security.py": "f504de339f5338657b7bd995605cb4942ff88b354a0d6942eabd7688bf06a93f",
+    "backend/server.py": "e6aaf12f6faff323341bb3ce0e4cbab3d2c4d1e84f53802871a4911a04167f48",
+    "backend/storage.py": "7ad10042cfe30fac40cad5f2ed526d8828a4e1ed77c860d7b972754d1b67764c",
+    "backend/tools/__init__.py": "9f56b5992177bade17203ae0059573a1dd275768102650321e1c91ee595118a2",
+    "backend/tools/document_tools.py": "8f8b3eb11703c4b7828d5fb777d1fc4f13c5663ac7ebbac0c2488ec6fb61b417",
+    "backend/tools/platform_adapters.py": "b81ccaaa1644ea27ebe14c0c018626734a9a7be34cb7409aa01cd64ee51c3dcd",
+    "backend/tools/review_tools.py": "6fa4c398cbcab9548e2842f8ac1d7b734124bf33c58df96942be75314b7994a1"
+  }
+}
