@@ -22,6 +22,13 @@ creation (`GOOGLE_GENAI_USE_VERTEXAI=true` and `GOOGLE_GENAI_LIVE_VERTEX=true`).
 offline results when credentials, model availability, or provider calls fail.
 Terraform enables the Vertex AI API and grants the runtime service account
 `roles/aiplatform.user` in the selected project before creating the revision.
+`vertex_ai_location` controls inference separately from the deployment/storage
+`region`; its default preserves the region. The authorized `commsrx-ai` target
+uses `vertex_ai_location=us` for US-geography inference while Cloud Run, Cloud SQL,
+artifact storage, and secrets remain in `us-central1`. The configured models'
+Interactions endpoint rejected `us-central1` and supports `us`, `eu`, and `global`.
+This configuration explicitly rejects `global`; model support in the selected
+geography is verified by the synthetic runtime probe and live application tests.
 Veeva credentials are mounted only when `mount_veeva_credentials=true`; that
 optional mount has its own secret-scoped access grant and requires a real secret
 version before enabling it. CAMS and CommsRx do not require Veeva credentials.

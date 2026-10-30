@@ -2,6 +2,7 @@
   "project_id": "commsrx-ai",
   "project_number": "333570013714",
   "region": "us-central1",
+  "vertex_ai_location": "us",
   "public_host": "mlr-genie.signalfidelitygroup.com",
   "repo_full_name": "abasuprab-png/MLR-Genie"
 }

@@ -29,6 +29,7 @@ def test_target_preserves_identity_and_uses_private_state_name():
     assert target.project_id == "commsrx-ai"
     assert str(target.project_number) == "333570013714"
     assert target.region == "us-central1"
+    assert target.inference_location == "us-central1"
     assert target.public_host == ""
     assert target.state_bucket == "mlr-genie-tfstate-333570013714"
 
@@ -44,6 +45,19 @@ def test_target_preserves_identity_and_uses_private_state_name():
 def test_target_rejects_ambiguous_or_executable_identifiers(changes):
     with pytest.raises((ValueError, RuntimeError)):
         _driver.Target.from_dict(target_data(**changes))
+
+
+@pytest.mark.parametrize("location", ["us", "eu", "us-central1", "europe-west1"])
+def test_inference_location_is_separate_from_resource_region(location):
+    target = _driver.Target.from_dict(target_data(vertex_ai_location=location))
+    assert target.inference_location == location
+    assert target.region == "us-central1"
+
+
+@pytest.mark.parametrize("location", ["global", "US", "us/other", "https://example.com", "other"])
+def test_inference_location_rejects_global_and_non_location_values(location):
+    with pytest.raises(ValueError, match="global inference is not permitted"):
+        _driver.Target.from_dict(target_data(vertex_ai_location=location))
 
 
 def test_project_guard_requires_exact_id_number_and_active_state():
@@ -692,10 +706,11 @@ def test_direct_cloud_run_network_error_cannot_count_as_ingress_rejection(tmp_pa
     assert "direct_cloud_run_ingress_blocked" not in current.report["checks"]
 
 
-def runtime_probe_deployment(tmp_path, *, result_changes=None, identity=None, execution_error=False, cleanup_error=False):
+def runtime_probe_deployment(tmp_path, *, result_changes=None, identity=None, execution_error=False, cleanup_error=False,
+                             inference_location=None):
     observed = {}
     probe_result = {
-        "project_id": "commsrx-ai", "location": "us-central1", "model": "gemini-3.5-flash-lite",
+        "project_id": "commsrx-ai", "location": inference_location or "us-central1", "model": "gemini-3.5-flash-lite",
         "effective_model": "gemini-3.5-flash-lite", "status": "passed", "used_live_sdk": True,
         "provider_http_status": None, "error_message": "", **(result_changes or {}),
     }
@@ -707,7 +722,7 @@ def runtime_probe_deployment(tmp_path, *, result_changes=None, identity=None, ex
                 "serviceAccountName": identity or runtime,
                 "containers": [{"env": [
                     {"name": "GOOGLE_CLOUD_PROJECT", "value": "commsrx-ai"},
-                    {"name": "GOOGLE_CLOUD_LOCATION", "value": "us-central1"},
+                    {"name": "GOOGLE_CLOUD_LOCATION", "value": inference_location or "us-central1"},
                     {"name": "MLR_GENIE_BOOTSTRAP_SECRET", "value": "must-not-reach-probe"},
                 ]}],
             }}}})
@@ -737,7 +752,7 @@ def runtime_probe_deployment(tmp_path, *, result_changes=None, identity=None, ex
             return completed(args)
         raise AssertionError(args)
 
-    current = deployment(tmp_path, FakeRunner(handler))
+    current = deployment(tmp_path, FakeRunner(handler), vertex_ai_location=inference_location or "")
     current.report.update(commit="e" * 40, image="us-central1-docker.pkg.dev/commsrx-ai/mlr-genie/app@sha256:" + "a" * 64)
     source = tmp_path / "deploy/automation/vertex_probe.py"
     source.parent.mkdir(parents=True)
@@ -762,6 +777,17 @@ def test_runtime_probe_uses_app_identity_exact_image_and_only_public_probe_envir
     assert observed["uri"].startswith("gs://commsrx-ai-mlr-versioned-artifacts/deployment-probes/")
     assert observed["deleted_object"] == observed["uri"] + "#42"
     assert current.report["checks"]["runtime_identity_live_vertex_probe"] is True
+
+
+def test_us_geography_probe_keeps_job_and_storage_in_deployment_region(tmp_path):
+    current, workspace, observed = runtime_probe_deployment(tmp_path, inference_location="us")
+    current.vertex_probe(workspace)
+    assert observed["flags"]["--region"] == "us-central1"
+    assert observed["env"]["GOOGLE_CLOUD_LOCATION"] == "us"
+    assert observed["uri"].startswith("gs://commsrx-ai-mlr-versioned-artifacts/deployment-probes/")
+    assert current.report["region"] == "us-central1"
+    assert current.report["vertex_ai_location"] == "us"
+    assert current.report["vertex_probe"]["location"] == "us"
 
 
 def test_provider_probe_failure_preserves_diagnostic_and_still_removes_temporary_resources(tmp_path):

@@ -59,11 +59,12 @@ class Target:
     repo_full_name: str
     region: str = "us-central1"
     public_host: str = ""
+    vertex_ai_location: str = ""
 
     @classmethod
     def from_dict(cls, value: dict) -> "Target":
         target = cls(**{key: str(value[key]) for key in (
-            "project_id", "project_number", "repo_full_name", "region", "public_host"
+            "project_id", "project_number", "repo_full_name", "region", "public_host", "vertex_ai_location"
         ) if key in value})
         if not re.fullmatch(r"[a-z][a-z0-9-]{4,28}[a-z0-9]", target.project_id):
             raise ValueError("A concrete GCP project_id is required.")
@@ -73,9 +74,17 @@ class Target:
             raise ValueError("repo_full_name must be an exact GitHub owner/repository.")
         if not re.fullmatch(r"[a-z]+-[a-z]+[0-9]", target.region):
             raise ValueError("region must be a GCP region such as us-central1.")
+        if target.vertex_ai_location and target.vertex_ai_location not in {"us", "eu"} and not re.fullmatch(
+            r"[a-z]+-[a-z]+[0-9]", target.vertex_ai_location
+        ):
+            raise ValueError("vertex_ai_location must be us, eu, or a GCP region; global inference is not permitted.")
         if target.public_host and not HOST_RE.fullmatch(target.public_host):
             raise ValueError("public_host must be a lowercase DNS hostname without scheme or path.")
         return target
+
+    @property
+    def inference_location(self) -> str:
+        return self.vertex_ai_location or self.region
 
     @property
     def state_bucket(self) -> str:
@@ -191,6 +200,7 @@ class Deployment:
         self.report: dict = {
             "started_at": self.now(), "status": "running", "project_id": target.project_id,
             "project_number": target.project_number, "region": target.region,
+            "vertex_ai_location": target.inference_location,
             "repo_full_name": target.repo_full_name, "checks": {}, "stages": [],
         }
         self.tf = ["terraform", f"-chdir={self.root / 'deploy/terraform'}"]
@@ -614,8 +624,8 @@ class Deployment:
         deployed_env = {item.get("name"): item.get("value") for item in containers[0].get("env", [])}
         location = deployed_env.get("GOOGLE_CLOUD_LOCATION", "")
         if (deployed_env.get("GOOGLE_CLOUD_PROJECT") != self.target.project_id
-                or location != self.target.region):
-            raise DeploymentError("Vertex probe must preserve the configured project and regional processing location.")
+                or location != self.target.inference_location):
+            raise DeploymentError("Vertex probe must preserve the configured project and inference location.")
         bucket = self.target.project_id + "-mlr-versioned-artifacts"
         suffix = self.report["commit"][:8] + "-" + secrets.token_hex(4)
         job_name = "mlr-genie-vertex-probe-" + suffix
@@ -801,6 +811,7 @@ class Deployment:
                 workspace = Path(temporary)
                 variables = workspace / "production.tfvars.json"
                 variables.write_text(json.dumps({"project_id": self.target.project_id, "region": self.target.region,
+                                                 "vertex_ai_location": self.target.inference_location,
                                                  "public_host": self.target.public_host, "app_image": image}))
                 with self.phase("initialize GCS Terraform backend and allocate public IP"):
                     self.runner.run([*self.tf, "init", "-input=false", "-no-color", "-reconfigure",

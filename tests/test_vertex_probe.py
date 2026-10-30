@@ -18,9 +18,9 @@ sys.modules[SPEC.name] = probe
 SPEC.loader.exec_module(probe)
 
 
-def fake_factory(payload, *, live=True, calls=None):
+def fake_factory(payload, *, live=True, calls=None, expected_location="us-central1"):
     def factory(config):
-        assert config.project_id == "commsrx-ai" and config.location == "us-central1"
+        assert config.project_id == "commsrx-ai" and config.location == expected_location
         assert config.use_vertex_ai and config.gemini_api_key is None and config.zero_data_retention
 
         def create_interaction(**kwargs):
@@ -87,7 +87,7 @@ def test_untrusted_status_values_are_not_persisted(status):
 
 
 @pytest.mark.parametrize("changes", [
-    {"project_id": "other-project"}, {"location": "global"}, {"location": "us"},
+    {"project_id": "other-project"}, {"location": "global"}, {"location": "other"},
     {"bucket": "other-bucket"}, {"object_name": "other-prefix/result.json"},
     {"object_name": "deployment-probes/../result.json"},
 ])
@@ -109,6 +109,16 @@ def test_private_result_upload_has_generation_zero_precondition():
     assert calls == [(('{"status": "passed"}',), {
         "content_type": "application/json", "if_generation_match": 0,
     })]
+
+
+@pytest.mark.parametrize("location", ["us", "eu", "us-central1"])
+def test_probe_accepts_explicit_geography_without_changing_configured_location(location):
+    probe.validate_target("commsrx-ai", location, "commsrx-ai-mlr-versioned-artifacts", "deployment-probes/test.json")
+    result = probe.collect_probe("commsrx-ai", location, router_factory=fake_factory(
+        {"ok": True}, expected_location=location,
+    ))
+    assert result["status"] == "passed"
+    assert result["location"] == location
 
 
 def set_target(monkeypatch, **changes):
