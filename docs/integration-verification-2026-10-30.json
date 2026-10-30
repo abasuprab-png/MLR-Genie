@@ -1,0 +1,208 @@
+{
+  "cams": {
+    "job_id": "integration_f3eeed04837045819c40e559e31e4f44",
+    "claim_id": "clm_integration_f3eeed04837045819c40e559e31e4f44_1",
+    "anchor": {
+      "page": 2,
+      "boundingBox": {
+        "x": 54,
+        "y": 96,
+        "width": 231.25,
+        "height": 41.120000000000005
+      },
+      "verdict": "supported",
+      "verifiedBy": "gemini-3.1-pro-preview+pymupdf",
+      "verifiedAt": "2026-10-30T17:20:49.897160Z",
+      "verbatimQuote": "In adults with EGFR-mutated NSCLC, Aurenix reduced\nthe risk of disease progression or death by 38%\ncompared with placebo."
+    },
+    "coordinateSpace": "pdf_points",
+    "pageDimensions": {
+      "width": 612,
+      "height": 792
+    },
+    "telemetry_receipts": [
+      {
+        "claim_id": "clm_integration_f3eeed04837045819c40e559e31e4f44_1",
+        "effective_model": "gemini-3.1-pro-preview",
+        "transport": "generate_content",
+        "service_tier": "standard",
+        "zero_data_retention": true,
+        "zdr_attestation": "provider_request_configured",
+        "verification_mode": "live_sdk_execution",
+        "cached_content": "cachedContents/di5fsfygxxq930zzdtxroxbb1bco5c7rv92ivsjk",
+        "used_live_sdk": true,
+        "interaction_id": "int_02c00c61c952",
+        "timestamp_iso": "2026-10-30T17:20:49.896553+00:00"
+      }
+    ]
+  },
+  "roundtrip": {
+    "job_id": "integration_1467415d3c674122878fe507e63cd704",
+    "state": "draft",
+    "requires_human_resolution": false,
+    "claims": [
+      {
+        "claim_id": "clm_integration_1467415d3c674122878fe507e63cd704_1",
+        "text": "In adults with EGFR-mutated NSCLC, Aurenix lowered the risk of disease progression or death by 38% compared with placebo.",
+        "verdict": "supported"
+      }
+    ],
+    "artifacts": {
+      "redline.docx": {
+        "filename": "redline.docx",
+        "download_url": "/integrations/commsrx/jobs/integration_1467415d3c674122878fe507e63cd704/artifacts/redline.docx",
+        "media_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "bytes": 37824,
+        "sha256": "7973aa758e44f22f4bd5c2b21c0233914bc34a8254afcbdd14d0c1e70ce665dd"
+      },
+      "clean_revised.docx": {
+        "filename": "clean_revised.docx",
+        "download_url": "/integrations/commsrx/jobs/integration_1467415d3c674122878fe507e63cd704/artifacts/clean_revised.docx",
+        "media_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "bytes": 37719,
+        "sha256": "2c65d493f37646dca335334a8cbf7f82345cede0eb43b6e962b52ec7f94c2ccb"
+      },
+      "audit_summary.pdf": {
+        "filename": "audit_summary.pdf",
+        "download_url": "/integrations/commsrx/jobs/integration_1467415d3c674122878fe507e63cd704/artifacts/audit_summary.pdf",
+        "media_type": "application/pdf",
+        "bytes": 5451,
+        "sha256": "1205f615112f38cf3fe5593de0efc390d2cfd2d4c07a34b2823c5c0299155f88"
+      },
+      "annotated_source.pdf": {
+        "filename": "annotated_source.pdf",
+        "download_url": "/integrations/commsrx/jobs/integration_1467415d3c674122878fe507e63cd704/artifacts/annotated_source.pdf",
+        "media_type": "application/pdf",
+        "bytes": 3260,
+        "sha256": "404c7a32670c918c39ed9ccc14a1ceb692e4e032481ca701fd12a1b231e8e4b5"
+      }
+    },
+    "telemetry_receipts": [
+      {
+        "claim_id": "clm_integration_1467415d3c674122878fe507e63cd704_1",
+        "effective_model": "gemini-3.1-pro-preview",
+        "transport": "generate_content",
+        "service_tier": "standard",
+        "zero_data_retention": true,
+        "zdr_attestation": "provider_request_configured",
+        "verification_mode": "live_sdk_execution",
+        "cached_content": "cachedContents/r7o5fkqiykh5j7xuv5uiw8fnhlwuywqdm7suhvui",
+        "used_live_sdk": true,
+        "interaction_id": "int_e5f325407976",
+        "timestamp_iso": "2026-10-30T17:21:17.884638+00:00"
+      }
+    ]
+  },
+  "router_telemetry_log": [
+    {
+      "model": "gemini-3.5-flash-lite",
+      "effective_model": "gemini-3.5-flash-lite",
+      "task_type": "cv08_pv_gate",
+      "service_tier": "standard",
+      "used_live_sdk": true,
+      "transport_mode": "generate_content",
+      "cached_content": null,
+      "previous_interaction_id": null,
+      "interaction_id": "int_dcae03c748b9"
+    },
+    {
+      "model": "gemini-4-argon",
+      "effective_model": "gemini-3.1-pro-preview",
+      "task_type": "claim_verification",
+      "service_tier": "standard",
+      "used_live_sdk": true,
+      "transport_mode": "generate_content",
+      "cached_content": "cachedContents/di5fsfygxxq930zzdtxroxbb1bco5c7rv92ivsjk",
+      "previous_interaction_id": null,
+      "interaction_id": "int_02c00c61c952"
+    },
+    {
+      "model": "gemini-3.5-flash-lite",
+      "effective_model": "gemini-3.5-flash-lite",
+      "task_type": "cv08_pv_gate",
+      "service_tier": "standard",
+      "used_live_sdk": true,
+      "transport_mode": "generate_content",
+      "cached_content": null,
+      "previous_interaction_id": null,
+      "interaction_id": "int_dcae03c748b9"
+    },
+    {
+      "model": "gemini-4-argon",
+      "effective_model": "gemini-3.1-pro-preview",
+      "task_type": "claim_verification",
+      "service_tier": "standard",
+      "used_live_sdk": true,
+      "transport_mode": "generate_content",
+      "cached_content": "cachedContents/r7o5fkqiykh5j7xuv5uiw8fnhlwuywqdm7suhvui",
+      "previous_interaction_id": null,
+      "interaction_id": "int_02c00c61c952"
+    },
+    {
+      "model": "gemini-4-argon",
+      "effective_model": "gemini-3.1-pro-preview",
+      "task_type": "comment_reconciliation",
+      "service_tier": "standard",
+      "used_live_sdk": true,
+      "transport_mode": "generate_content",
+      "cached_content": null,
+      "previous_interaction_id": null,
+      "interaction_id": "int_0c5cbbcf2272"
+    },
+    {
+      "model": "gemini-4-argon",
+      "effective_model": "gemini-3.1-pro-preview",
+      "task_type": "claim_verification",
+      "service_tier": "standard",
+      "used_live_sdk": true,
+      "transport_mode": "generate_content",
+      "cached_content": "cachedContents/r7o5fkqiykh5j7xuv5uiw8fnhlwuywqdm7suhvui",
+      "previous_interaction_id": null,
+      "interaction_id": "int_e5f325407976"
+    },
+    {
+      "model": "gemini-4-argon",
+      "effective_model": "gemini-3.1-pro-preview",
+      "task_type": "claim_verification",
+      "service_tier": "standard",
+      "used_live_sdk": true,
+      "transport_mode": "generate_content",
+      "cached_content": "cachedContents/r7o5fkqiykh5j7xuv5uiw8fnhlwuywqdm7suhvui",
+      "previous_interaction_id": null,
+      "interaction_id": "int_e5f325407976"
+    }
+  ],
+  "source_sha256": {
+    "backend/__init__.py": "1044ee2f109dfffe8f2d254724a6aee6ae2a676e74284270c7d8cb1a7539c478",
+    "backend/agent/__init__.py": "5d015742b9df420a8b8d440da761c50e216936debb3d29c6e682dcf0658d7490",
+    "backend/agent/gemini_gateway.py": "213c61d875e295c38d887c4e3abddf5d1833a124093dad77a40dd027f67d7a6f",
+    "backend/agent/mlr_genie_agent.py": "6fe64be0af4ef015e34998cda070b7c6868df4e08d87a6174b8c56dd632e35c9",
+    "backend/agent/models_router.py": "ff929b77fbe2b03830ad0439bb60baf1061b2d8971f8d957b25edebe0adf1fcd",
+    "backend/config.py": "4663f5a382a33a85f1d3eef3ed16614c0ae7bd9878c9013b1227f1b6709ab460",
+    "backend/document_engine.py": "91f1cfeb65b30156924d8ba5217d9be22c887867926bb967b71afb7bddae38a5",
+    "backend/domain/__init__.py": "c1e14862e5721fb64e74f1af8a444de1eba8ebc605ca6ff34a9f446d9a14a2f7",
+    "backend/domain/assessments.py": "0203596adb37a3872142611f03ed3db9aa6ea7890c250a520f508457d76901fd",
+    "backend/domain/integrations.py": "7dd342319f30d94944dcf044752bbd36e9f702394b689ef2ec96903c3891a906",
+    "backend/domain/schemas.py": "2977f76ea9604144cb48246ef175537954eff0d78fcd8a1b27ec78d3595dc2b9",
+    "backend/integrations.py": "9fdbceac306dcb4b2b9d7251e85b1b39ca87abd87be0bc03d2bd371a56661b84",
+    "backend/main.py": "9d95d973cc2978413955c2f2796b3acbfbb1cf6e33533f2d863a131d4c9df256",
+    "backend/storage.py": "b978c347b0c1c55dd8dae47ef7c756a35a5a0aa444a0d2280668a57f0030921e",
+    "backend/tools/__init__.py": "9f56b5992177bade17203ae0059573a1dd275768102650321e1c91ee595118a2",
+    "backend/tools/document_tools.py": "ecb13b2213787ca653a7e17e79afa549c2f3da0752888c9dc3d8e54aeaf590d9",
+    "backend/tools/platform_adapters.py": "b81ccaaa1644ea27ebe14c0c018626734a9a7be34cb7409aa01cd64ee51c3dcd",
+    "backend/tools/review_tools.py": "6fa4c398cbcab9548e2842f8ac1d7b734124bf33c58df96942be75314b7994a1",
+    "integrations/camsCommsRxClient.ts": "04a2bdc0841600673b8e1400d6e715c88b38589ff83d1f5d5f4293736b837e6e"
+  },
+  "validation": {
+    "date": "2026-10-30",
+    "base_commit": "edca022",
+    "python_tests_passed": 128,
+    "typescript_tests_passed": 32,
+    "both_typescript_checks_passed": true,
+    "real_http": true,
+    "compiled_typescript_client": true,
+    "unmocked_gemini": true,
+    "redline_ooxml_verified": true,
+    "artifact_hashes_verified": true
+  }
+}

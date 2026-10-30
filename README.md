@@ -1,5 +1,9 @@
 # MLR Genie Prototype (`v3.4.0`)
 
+The [CAMS and CommsRx integration guide](integrations/README.md) documents the
+authenticated source-anchor endpoint, Review Room roundtrip, and standalone
+TypeScript client.
+
 See [v3.4.0 hardening notes](docs/v3.4.0-hardening.md) for offline claim coverage,
 signed-session routes, approval-day label diffs, and live SDK model-ID resolution.
 The independent-review material below describes the earlier prototype baseline.

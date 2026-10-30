@@ -6,7 +6,7 @@ from typing import Any
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from backend.agent.mlr_genie_agent import MlrGenieAgent
 from backend.agent.models_router import GeminiModelRouter
@@ -33,6 +33,10 @@ from backend.domain.schemas import (
     StatementReuseRecord,
 )
 from backend.storage import CrossTenantAccessError, DurableJobStore, JobConflictError
+from backend.domain.integrations import (
+    CamsVerificationInput, CamsVerificationResponse, CommsRxRoundtripInput, CommsRxRoundtripResponse,
+)
+from backend.integrations import COMMSRX_ARTIFACTS, MAX_REFERENCE_BYTES, IntegrationService
 from backend.tools.document_tools import (
     apply_accepted_changes,
     import_rd_handoff_pack,
@@ -1190,6 +1194,54 @@ def execute_file_roundtrip_endpoint(job_id: str, request: Request) -> dict[str, 
 
 
 _execute_roundtrip_for_job = execute_file_roundtrip_endpoint
+
+
+@app.post("/integrations/cams/verify-source", response_model=CamsVerificationResponse,
+          response_model_exclude_none=True)
+def verify_cams_source_endpoint(
+    request: Request, payload: str = Form(...), reference_pdf: UploadFile = File(...),
+) -> CamsVerificationResponse:
+    tenant, actor = _require_authenticated_tenant(request)
+    try:
+        body = CamsVerificationInput.model_validate_json(payload)
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail=json.loads(exc.json(include_input=False, include_context=False))) from exc
+    return IntegrationService(JOBS_DB, router, _job_artifact_dir).verify_cams(
+        body, reference_pdf.file.read(MAX_REFERENCE_BYTES + 1), tenant, actor,
+    )
+
+
+@app.post("/integrations/commsrx/roundtrip", response_model=CommsRxRoundtripResponse)
+def commsrx_roundtrip_endpoint(
+    request: Request, payload: str = Form(...), reference_pdf: UploadFile = File(...),
+) -> CommsRxRoundtripResponse:
+    tenant, actor = _require_authenticated_tenant(request)
+    try:
+        body = CommsRxRoundtripInput.model_validate_json(payload)
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail=json.loads(exc.json(include_input=False, include_context=False))) from exc
+    return IntegrationService(JOBS_DB, router, _job_artifact_dir).commsrx_roundtrip(
+        body, reference_pdf.file.read(MAX_REFERENCE_BYTES + 1), tenant, actor,
+        execute=lambda job_id: _execute_roundtrip_for_job(job_id, request),
+    )
+
+
+@app.get("/integrations/commsrx/jobs/{job_id}/artifacts/{artifact_name}")
+def download_commsrx_artifact(job_id: str, artifact_name: str, request: Request) -> FileResponse:
+    tenant, _ = _require_authenticated_tenant(request)
+    try:
+        JOBS_DB.get_for_tenant(job_id, tenant)
+    except CrossTenantAccessError as exc:
+        raise HTTPException(status_code=403, detail="Cross-tenant artifact access denied.") from exc
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Job not found.") from exc
+    spec = COMMSRX_ARTIFACTS.get(artifact_name)
+    if not spec:
+        raise HTTPException(status_code=404, detail="Unknown integration artifact.")
+    path = _job_artifact_dir(job_id) / spec[0]
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Integration artifact not generated.")
+    return FileResponse(path, media_type=spec[1], filename=artifact_name)
 
 
 @app.get("/jobs/{job_id}/artifacts")

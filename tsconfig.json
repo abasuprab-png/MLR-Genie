@@ -13,5 +13,5 @@
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true
   },
-  "include": ["src/**/*", "client/src/**/*"]
+  "include": ["src/**/*", "client/src/**/*", "integrations/**/*"]
 }

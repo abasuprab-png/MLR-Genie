@@ -772,6 +772,7 @@ def locate_and_anchor_evidence(
     job: JobRecord,
     source_pack: list[dict[str, Any]] | dict[str, Any] | None = None,
     router: GeminiModelRouter | None = None,
+    claim_texts: list[str] | None = None,
 ) -> list[ClaimAssessment]:
     """
     Section 3.C & 3.D — Extracts factual claims, verifies PICO clinical entailment dimensions
@@ -833,6 +834,12 @@ def locate_and_anchor_evidence(
                 index = next((i for i, p in enumerate(paragraphs) if span in p), 0)
                 candidates.append((index, span, True))
                 eligible.append(span)
+
+    if claim_texts is not None:
+        if any(not text.strip() or text not in body for text in claim_texts):
+            raise ValueError("Explicit claims must appear verbatim in the working revision.")
+        candidates = [(next((i for i, p in enumerate(paragraphs) if text in p), 0), text, True)
+                      for text in claim_texts]
 
     for p_idx, para, is_extracted_span in candidates:
         para_lower = para.lower()
