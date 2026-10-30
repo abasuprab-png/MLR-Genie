@@ -1,11 +1,11 @@
 # ==============================================================================
 # MLR Genie — Production Google Cloud Platform (GCP) Terraform Configuration
 # Deploys:
-# 1. Regional Cloud Run Services (MLR Genie Web/ADK Orchestrator + Document Worker + MCP Adapters)
-# 2. Cloud SQL for PostgreSQL (with pgvector for 4-Dimension Statement Library & ADK Sessions)
-# 3. Versioned Google Cloud Storage Buckets with CMEK & Retention Policy
-# 4. Secret Manager Secrets for Veeva Vault PromoMats & Aprimo Credentials
-# 5. Cloud Armor Security Policy & OpenTelemetry Alerting Policies
+# 1. Regional Cloud Run backend with hosted authentication and live Vertex AI
+# 2. Cloud SQL PostgreSQL job JSON and private artifact manifests, authenticated through IAM
+# 3. Private versioned Google Cloud Storage with soft deletion for artifacts
+# 4. Secret Manager containers and scoped runtime access
+# 5. External HTTPS load balancer, managed certificate, and Cloud Armor throttling
 # ==============================================================================
 
 terraform {
@@ -50,7 +50,20 @@ resource "google_service_account" "mlr_genie_runtime_sa" {
   display_name = "MLR Genie ADK Runtime Service Account"
 }
 
-# 2. Immutable Versioned Cloud Storage Bucket for Working Documents & Approved Handoffs
+resource "google_project_service" "vertex_ai" {
+  project            = var.project_id
+  service            = "aiplatform.googleapis.com"
+  disable_on_destroy = false
+}
+
+resource "google_project_iam_member" "runtime_vertex_ai" {
+  project    = var.project_id
+  role       = "roles/aiplatform.user"
+  member     = "serviceAccount:${google_service_account.mlr_genie_runtime_sa.email}"
+  depends_on = [google_project_service.vertex_ai]
+}
+
+# 2. Private Versioned Cloud Storage Bucket for Working Documents & Approved Handoffs
 resource "google_storage_bucket" "mlr_artifacts_bucket" {
   name                        = "${var.project_id}-mlr-versioned-artifacts"
   location                    = var.region
@@ -123,15 +136,40 @@ resource "google_secret_manager_secret_iam_member" "auth_runtime_access" {
   member    = "serviceAccount:${google_service_account.mlr_genie_runtime_sa.email}"
 }
 
+# Cloud Run resolves this existing environment secret before starting a revision.
+resource "google_secret_manager_secret_iam_member" "veeva_runtime_access" {
+  secret_id = google_secret_manager_secret.veeva_vault_credentials.secret_id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.mlr_genie_runtime_sa.email}"
+}
+
 # 4. Cloud Run Service for MLR Genie ADK Orchestrator & 4-Area Web Application
 resource "google_cloud_run_v2_service" "mlr_genie_service" {
-  name       = "mlr-genie-adk-app"
-  location   = var.region
-  ingress    = "INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER"
-  depends_on = [google_secret_manager_secret_iam_member.auth_runtime_access]
+  name     = "mlr-genie-adk-app"
+  location = var.region
+  ingress  = "INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER"
+  depends_on = [
+    google_secret_manager_secret_iam_member.auth_runtime_access,
+    google_secret_manager_secret_iam_member.veeva_runtime_access,
+    google_project_service.vertex_ai,
+    google_project_iam_member.runtime_vertex_ai,
+    google_project_service.cloud_sql_admin,
+    google_project_iam_member.runtime_cloud_sql,
+    google_sql_database.mlr_genie,
+    google_sql_user.runtime_iam,
+    google_storage_bucket_iam_member.runtime_artifact_objects,
+  ]
 
   template {
-    service_account = google_service_account.mlr_genie_runtime_sa.email
+    service_account       = google_service_account.mlr_genie_runtime_sa.email
+    execution_environment = "EXECUTION_ENVIRONMENT_GEN2"
+
+    volumes {
+      name = "cloudsql"
+      cloud_sql_instance {
+        instances = [google_sql_database_instance.mlr_genie.connection_name]
+      }
+    }
 
     scaling {
       min_instance_count = 0 # Scales to zero when idle to optimize cost & sustainability
@@ -140,6 +178,28 @@ resource "google_cloud_run_v2_service" "mlr_genie_service" {
 
     containers {
       image = var.app_image
+
+      volume_mounts {
+        name       = "cloudsql"
+        mount_path = "/cloudsql"
+      }
+
+      env {
+        name  = "DATABASE_URL"
+        value = local.database_url
+      }
+      env {
+        name  = "MLR_GENIE_DB_IAM_AUTH"
+        value = "true"
+      }
+      env {
+        name  = "MLR_GENIE_REQUIRE_DURABLE_STORAGE"
+        value = "true"
+      }
+      env {
+        name  = "MLR_GENIE_ARTIFACT_BACKEND"
+        value = "gcs"
+      }
 
       env {
         name  = "MLR_GENIE_ENV"
@@ -174,6 +234,14 @@ resource "google_cloud_run_v2_service" "mlr_genie_service" {
 
       env {
         name  = "GOOGLE_GENAI_USE_VERTEXAI"
+        value = "true"
+      }
+      env {
+        name  = "GOOGLE_GENAI_LIVE_VERTEX"
+        value = "true"
+      }
+      env {
+        name  = "MLR_REQUIRE_LIVE_GEMINI"
         value = "true"
       }
       env {

@@ -1,0 +1,12 @@
+# Replace every placeholder with an approved deployment target. Do not put
+# signing, bootstrap, database, or connector credentials in this file or state.
+project_id  = "YOUR_GCP_PROJECT_ID"
+region      = "YOUR_GCP_REGION"
+public_host = "mlr.your-controlled-domain.example"
+app_image   = "REGION-docker.pkg.dev/PROJECT/REPOSITORY/mlr-genie@sha256:REPLACE_WITH_64_HEX_DIGEST"
+
+# Production defaults; review capacity, regional availability, and cost.
+database_tier                = "db-custom-2-7680"
+database_availability_type   = "REGIONAL"
+database_disk_size_gb        = 20
+database_deletion_protection = true

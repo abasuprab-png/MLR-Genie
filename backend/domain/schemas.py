@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Literal
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, PrivateAttr, model_validator
 from backend.domain.assessments import VerifiedSafetyFinding
 
 
@@ -406,6 +406,10 @@ class SourcePackList(list):
 
 class JobRecord(BaseModel):
     """Authoritative job record stored outside conversational memory (Section 2, 3, 8)."""
+
+    # Persistence metadata belongs to the repository, never to public job JSON.
+    _storage_revision: int | None = PrivateAttr(default=None)
+    _artifact_manifest: dict[str, dict[str, Any]] = PrivateAttr(default_factory=dict)
 
     job_id: str
     tenant_id: str

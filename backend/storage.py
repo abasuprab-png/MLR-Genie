@@ -7,17 +7,45 @@ import sqlite3
 import tempfile
 from collections.abc import Iterator, MutableMapping
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from backend.domain.schemas import JobRecord
+
+if TYPE_CHECKING:
+    from backend.postgres_storage import PostgresJobStore
 
 
 class JobConflictError(Exception):
     """Raised when an intake attempts to overwrite an existing job ID."""
 
 
+class JobUpdateConflictError(JobConflictError):
+    """Raised when an update targets a stale or deleted job revision."""
+
+
+class StorageUnavailableError(RuntimeError):
+    """A sanitized storage failure that may safely be returned by the API."""
+
+
 class CrossTenantAccessError(PermissionError):
     """Raised when a principal from one tenant attempts to access another tenant's job."""
+
+
+def create_job_store(database_url: str | None = None) -> DurableJobStore | PostgresJobStore:
+    """Choose an explicit storage backend; never downgrade an unknown URL to SQLite."""
+    url = database_url if database_url is not None else os.getenv(
+        "DATABASE_URL", "sqlite:///./mlr_genie_authoritative.db"
+    )
+    if url.startswith("sqlite:///"):
+        path = url.removeprefix("sqlite:///")
+        if not path:
+            raise ValueError("SQLite DATABASE_URL requires a database file path.")
+        return DurableJobStore(path)
+    if url.startswith(("postgresql://", "postgres://")):
+        from backend.postgres_storage import PostgresJobStore
+
+        return PostgresJobStore(url)
+    raise ValueError("DATABASE_URL must use sqlite:///, postgresql://, or postgres://.")
 
 
 class DurableJobStore(MutableMapping[str, JobRecord]):

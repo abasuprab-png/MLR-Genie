@@ -8,6 +8,14 @@ Blob, and AbortSignal APIs (browsers and Node 18+).
 
 ## Authentication and transport
 
+MLR Genie owns the persisted review job and its generated artifacts. CAMS and
+CommsRx keep their own source documents and workflow state and reference MLR's
+job IDs, claim IDs, hashes, and authenticated artifact URLs. Production uses a
+separate logical PostgreSQL database and private GCS bucket; consumer applications
+do not need database or bucket credentials. A stale concurrent update returns
+409 and requires reloading the job before deciding whether to retry. Request and
+response formats and artifact URLs remain unchanged.
+
 Use an already-issued MLR signed session token. Both integration endpoints use
 the existing tenant/actor authentication checks; the client always sends
 `Authorization: Bearer <token>`, including on artifact downloads. Tenant and actor
