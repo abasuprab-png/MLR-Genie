@@ -821,7 +821,7 @@ def test_gemini_dual_mode_sdk_transport_interactions_vs_generate_content() -> No
     assert vertex_kwargs["response_format"] == {
         "type": "text",
         "mime_type": "application/json",
-        "json_schema": schema,
+        "schema": schema,
     }
     assert len(vertex_kwargs["safety_settings"]) == 4
 
