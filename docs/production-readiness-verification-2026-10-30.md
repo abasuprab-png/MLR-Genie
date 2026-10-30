@@ -29,8 +29,9 @@ authority still requires an explicit individual reviewer/approver token.
 
 The preferred global external HTTPS load balancer uses a serverless NEG and a
 Google-managed certificate for the required `public_host`. Cloud Run retains
-internal-and-load-balancer ingress. Its invoker grant permits the load balancer
-to forward application bearer tokens. Cloud Armor throttles `/auth/*` at 60
+internal-and-load-balancer ingress. Its service-scoped `invoker_iam_disabled`
+setting permits the load balancer to forward application bearer tokens without
+an `allUsers` IAM grant. Cloud Armor throttles `/auth/*` at 60
 requests/minute/IP and `/integrations/*` at 600. See
 [deployment instructions](../deploy/terraform/README.md).
 
