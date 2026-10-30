@@ -191,6 +191,11 @@ def test_journal_intake_probe_matches_the_production_gateway_request_without_rea
     from backend.config import GcpAgentConfig
 
     source = Path(__file__).resolve().parents[1] / "backend/tools/review_tools.py"
+    driver = Path(__file__).resolve().parents[1] / "deploy/automation/deploy_gcp.py"
+    claim = next(node.value.value for node in ast.parse(driver.read_text()).body
+                 if isinstance(node, ast.Assign) and any(isinstance(target, ast.Name)
+                 and target.id == "PAPER_CLAIM" for target in node.targets))
+    assert probe.JOURNAL_CLAIM == claim
     function = next(node for node in ast.parse(source.read_text()).body
                     if isinstance(node, ast.FunctionDef) and node.name == "screen_pharmacovigilance_cv08")
     call = next(node for node in ast.walk(function) if isinstance(node, ast.Call)
