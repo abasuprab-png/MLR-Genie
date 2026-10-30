@@ -25,9 +25,22 @@ variable "project_id" {
 }
 
 variable "region" {
-  description = "Regional deployment location for strict data residency (e.g., us-central1, europe-west1)"
+  description = "Regional deployment and storage location (e.g., us-central1, europe-west1)"
   type        = string
   default     = "us-central1"
+}
+
+variable "vertex_ai_location" {
+  description = "Vertex inference geography or region; null preserves region, and global is not permitted"
+  type        = string
+  default     = null
+  validation {
+    condition = var.vertex_ai_location == null ? true : (
+      contains(["us", "eu"], var.vertex_ai_location) ||
+      can(regex("^[a-z]+-[a-z]+[0-9]$", var.vertex_ai_location))
+    )
+    error_message = "vertex_ai_location must be us, eu, or a GCP region; global inference is not permitted."
+  }
 }
 
 variable "app_image" {
@@ -282,7 +295,7 @@ resource "google_cloud_run_v2_service" "mlr_genie_service" {
       }
       env {
         name  = "GOOGLE_CLOUD_LOCATION"
-        value = var.region
+        value = coalesce(var.vertex_ai_location, var.region)
       }
       env {
         name  = "MLR_GCS_BUCKET"

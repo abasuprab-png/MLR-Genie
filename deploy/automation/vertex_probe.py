@@ -1,4 +1,4 @@
-"""Synthetic regional Vertex diagnostic, executable as source in a Cloud Run job.
+"""Synthetic Vertex diagnostic, executable as source in a Cloud Run job.
 
 The deployment driver embeds this source into the existing application image.
 Only a sanitized result is written to an immutable private GCS object; this
@@ -41,8 +41,8 @@ def sanitize_error(value: Any) -> str:
 def validate_target(project_id: str, location: str, bucket: str, object_name: str) -> None:
     if project_id != PROJECT_ID:
         raise ValueError("Probe project must match the authorized deployment project.")
-    if not re.fullmatch(r"[a-z]+-[a-z]+[0-9]", location):
-        raise ValueError("Probe requires a regional location; global inference is not permitted.")
+    if location not in {"us", "eu"} and not re.fullmatch(r"[a-z]+-[a-z]+[0-9]", location):
+        raise ValueError("Probe requires us, eu, or a regional location; global inference is not permitted.")
     if bucket != f"{PROJECT_ID}-mlr-versioned-artifacts":
         raise ValueError("Probe destination must be the deployment's private artifact bucket.")
     if (not object_name.startswith("deployment-probes/") or len(object_name) > 1024
@@ -80,7 +80,7 @@ def collect_probe(project_id: str, location: str, *, router_factory=GeminiModelR
             result["error_message"] = sanitize_error(payload.get("error", "Provider error without diagnostic."))
         elif not result["used_live_sdk"]:
             result["status"] = "client_unavailable"
-            result["error_message"] = "The regional Vertex client did not execute a live SDK request."
+            result["error_message"] = "The configured Vertex client did not execute a live SDK request."
         elif payload == {"ok": True}:
             result["status"] = "passed"
         else:
@@ -120,7 +120,7 @@ def main() -> int:
     except Exception:
         print("Vertex probe could not store its sanitized diagnostic.", file=sys.stderr)
         return 1
-    print("Sanitized regional Vertex probe diagnostic stored.")
+    print("Sanitized Vertex probe diagnostic stored.")
     return 0
 
 

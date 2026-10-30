@@ -16,7 +16,7 @@ from backend.config import GcpAgentConfig
 from backend.domain.assessments import IntakeAssessment
 
 
-def sdk_router(handler, *, vertex=True):
+def sdk_router(handler, *, vertex=True, location="us-central1"):
     config = GcpAgentConfig(gemini_api_key=None, use_vertex_ai=False)
     router = GeminiModelRouter(config)
     options = {
@@ -25,14 +25,14 @@ def sdk_router(handler, *, vertex=True):
     }
     if vertex:
         router._client = genai.Client(
-            vertexai=True, project="commsrx-ai", location="us-central1",
+            vertexai=True, project="commsrx-ai", location=location,
             credentials=Credentials("unit-test-not-a-real-token"), http_options=options,
         )
     else:
         router._client = genai.Client(
             vertexai=False, api_key="unit-test-not-a-real-key", http_options=options,
         )
-    router.config = replace(config, use_vertex_ai=vertex, project_id="commsrx-ai", location="us-central1")
+    router.config = replace(config, use_vertex_ai=vertex, project_id="commsrx-ai", location=location)
     return router
 
 
@@ -111,6 +111,30 @@ def test_installed_developer_sdk_retains_generate_content_safety_and_schema():
         assert body["safetySettings"] == router.get_clinical_safety_settings()
         assert body["generationConfig"]["responseJsonSchema"] == IntakeAssessment.model_json_schema()
         assert body["generationConfig"]["responseMimeType"] == "application/json"
+    finally:
+        router._client.close()
+
+
+def test_installed_vertex_sdk_uses_us_geography_endpoint_without_global_fallback():
+    calls = []
+
+    def handler(request):
+        calls.append(request)
+        return httpx.Response(200, json={
+            "id": "synthetic-us-interaction", "object": "interaction", "status": "completed",
+            "steps": [{"type": "model_output", "content": [{"type": "text", "text": '{"claims": [], "safety_findings": []}'}]}],
+        })
+
+    router = sdk_router(handler, location="us")
+    try:
+        assessment, telemetry = assess(router)
+        assert assessment.model_dump() == {"claims": [], "safety_findings": []}
+        assert telemetry.used_live_sdk
+        assert len(calls) == 1
+        assert str(calls[0].url) == (
+            "https://aiplatform.us.rep.googleapis.com/v1beta1/projects/commsrx-ai/locations/us/interactions"
+        )
+        assert "global" not in str(calls[0].url)
     finally:
         router._client.close()
 

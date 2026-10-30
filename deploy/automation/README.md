@@ -85,6 +85,13 @@ scoped runtime access, creates absent signing/bootstrap secrets privately, and
 bootstraps the SQL schema through a temporary narrowly scoped import grant.
 It never resets an administrator password or substitutes fake Veeva credentials.
 
+The target separates the application's GCP `region` from `vertex_ai_location`.
+Cloud Run, PostgreSQL, and artifact storage stay in `us-central1`; Vertex uses
+the `us` endpoint because Interactions supports the US and EU geographies rather
+than individual regions. This target keeps inference in the US and does not
+enable global processing. The runtime probe verifies the deployed inference
+location independently of the job's regional execution location.
+
 The `mlr-genie/public-ip` GitHub commit status publishes the IP as soon as it is
 allocated, before the workflow waits for Cloudflare DNS and Google-managed TLS.
 If that status channel is unavailable, Cloud Shell can read the same non-secret
