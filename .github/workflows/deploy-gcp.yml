@@ -131,6 +131,11 @@ jobs:
           version: '591.0.0'
           project_id: commsrx-ai
 
+      - name: Enable project inspection API
+        # Use the authorized immutable project number: resolving an ID can itself
+        # require the API that this first-run step is enabling.
+        run: gcloud services enable cloudresourcemanager.googleapis.com --project=333570013714 --quiet
+
       - name: Deploy and verify production
         env:
           GITHUB_TOKEN: ${{ github.token }}
