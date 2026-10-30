@@ -852,10 +852,10 @@ class Deployment:
                 bootstrap = self.read_bootstrap_secret()
                 with self.phase("verify live TypeScript CAMS and CommsRx roundtrip"):
                     evidence = self.integration_eval(bootstrap)
-                with self.phase("verify public journal PDF against live Vertex AI"):
-                    self.journal_eval(bootstrap, workspace)
                 with self.phase("verify durable job, four artifacts and reviewer provenance across revisions"):
                     self.revision_persistence(evidence, bootstrap)
+                with self.phase("verify public journal PDF against live Vertex AI"):
+                    self.journal_eval(bootstrap, workspace)
             self.report["status"] = "passed"
             self.report["finished_at"] = self.now()
             self._publish_public_ip_status(state="success")
