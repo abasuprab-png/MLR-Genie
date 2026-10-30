@@ -31,16 +31,22 @@ variable "region" {
 }
 
 variable "vertex_ai_location" {
-  description = "Vertex inference geography or region; null preserves region, and global is not permitted"
+  description = "Vertex inference geography or region; global also requires allow_global_inference=true"
   type        = string
   default     = null
   validation {
     condition = var.vertex_ai_location == null ? true : (
-      contains(["us", "eu"], var.vertex_ai_location) ||
+      contains(["us", "eu", "global"], var.vertex_ai_location) ||
       can(regex("^[a-z]+-[a-z]+[0-9]$", var.vertex_ai_location))
     )
-    error_message = "vertex_ai_location must be us, eu, or a GCP region; global inference is not permitted."
+    error_message = "vertex_ai_location must be us, eu, global, or a GCP region."
   }
+}
+
+variable "allow_global_inference" {
+  description = "Explicit approval for global AI processing, which has no US-jurisdiction processing guarantee"
+  type        = bool
+  default     = false
 }
 
 variable "app_image" {
@@ -185,6 +191,12 @@ resource "google_cloud_run_v2_service" "mlr_genie_service" {
   location             = var.region
   ingress              = "INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER"
   invoker_iam_disabled = true
+  lifecycle {
+    precondition {
+      condition     = coalesce(var.vertex_ai_location, var.region) != "global" || var.allow_global_inference
+      error_message = "Global AI processing requires explicit allow_global_inference=true approval."
+    }
+  }
   depends_on = [
     google_secret_manager_secret_iam_member.auth_runtime_access,
     google_secret_manager_secret_iam_member.veeva_runtime_access,

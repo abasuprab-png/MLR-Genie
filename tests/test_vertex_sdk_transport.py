@@ -115,7 +115,11 @@ def test_installed_developer_sdk_retains_generate_content_safety_and_schema():
         router._client.close()
 
 
-def test_installed_vertex_sdk_uses_us_geography_endpoint_without_global_fallback():
+@pytest.mark.parametrize("location,expected_url", [
+    ("us", "https://aiplatform.us.rep.googleapis.com/v1beta1/projects/commsrx-ai/locations/us/interactions"),
+    ("global", "https://aiplatform.googleapis.com/v1beta1/projects/commsrx-ai/locations/global/interactions"),
+])
+def test_installed_vertex_sdk_uses_configured_geography_endpoint(location, expected_url):
     calls = []
 
     def handler(request):
@@ -125,16 +129,15 @@ def test_installed_vertex_sdk_uses_us_geography_endpoint_without_global_fallback
             "steps": [{"type": "model_output", "content": [{"type": "text", "text": '{"claims": [], "safety_findings": []}'}]}],
         })
 
-    router = sdk_router(handler, location="us")
+    router = sdk_router(handler, location=location)
     try:
         assessment, telemetry = assess(router)
         assert assessment.model_dump() == {"claims": [], "safety_findings": []}
         assert telemetry.used_live_sdk
         assert len(calls) == 1
-        assert str(calls[0].url) == (
-            "https://aiplatform.us.rep.googleapis.com/v1beta1/projects/commsrx-ai/locations/us/interactions"
-        )
-        assert "global" not in str(calls[0].url)
+        assert str(calls[0].url) == expected_url
+        if location == "us":
+            assert "global" not in str(calls[0].url)
     finally:
         router._client.close()
 

@@ -60,10 +60,14 @@ class Target:
     region: str = "us-central1"
     public_host: str = ""
     vertex_ai_location: str = ""
+    allow_global_inference: bool = False
 
     @classmethod
     def from_dict(cls, value: dict) -> "Target":
-        target = cls(**{key: str(value[key]) for key in (
+        allow_global = value.get("allow_global_inference", False)
+        if type(allow_global) is not bool:
+            raise ValueError("allow_global_inference must be a JSON boolean.")
+        target = cls(allow_global_inference=allow_global, **{key: str(value[key]) for key in (
             "project_id", "project_number", "repo_full_name", "region", "public_host", "vertex_ai_location"
         ) if key in value})
         if not re.fullmatch(r"[a-z][a-z0-9-]{4,28}[a-z0-9]", target.project_id):
@@ -74,10 +78,12 @@ class Target:
             raise ValueError("repo_full_name must be an exact GitHub owner/repository.")
         if not re.fullmatch(r"[a-z]+-[a-z]+[0-9]", target.region):
             raise ValueError("region must be a GCP region such as us-central1.")
-        if target.vertex_ai_location and target.vertex_ai_location not in {"us", "eu"} and not re.fullmatch(
+        if target.inference_location == "global" and not target.allow_global_inference:
+            raise ValueError("Global inference requires explicit allow_global_inference=true.")
+        if target.vertex_ai_location and target.vertex_ai_location not in {"us", "eu", "global"} and not re.fullmatch(
             r"[a-z]+-[a-z]+[0-9]", target.vertex_ai_location
         ):
-            raise ValueError("vertex_ai_location must be us, eu, or a GCP region; global inference is not permitted.")
+            raise ValueError("vertex_ai_location must be us, eu, global, or a GCP region.")
         if target.public_host and not HOST_RE.fullmatch(target.public_host):
             raise ValueError("public_host must be a lowercase DNS hostname without scheme or path.")
         return target
@@ -201,6 +207,7 @@ class Deployment:
             "started_at": self.now(), "status": "running", "project_id": target.project_id,
             "project_number": target.project_number, "region": target.region,
             "vertex_ai_location": target.inference_location,
+            "allow_global_inference": target.allow_global_inference,
             "repo_full_name": target.repo_full_name, "checks": {}, "stages": [],
         }
         self.tf = ["terraform", f"-chdir={self.root / 'deploy/terraform'}"]
@@ -632,12 +639,15 @@ class Deployment:
         object_name = "deployment-probes/" + suffix + ".json"
         uri = "gs://" + bucket + "/" + object_name
         env_file = workspace / "vertex-probe-env.json"
-        env_file.write_text(json.dumps({
+        probe_env = {
             "GOOGLE_CLOUD_PROJECT": self.target.project_id,
             "GOOGLE_CLOUD_LOCATION": location,
             "GOOGLE_GENAI_USE_VERTEXAI": "true", "GOOGLE_GENAI_LIVE_VERTEX": "true",
             "MLR_VERTEX_PROBE_BUCKET": bucket, "MLR_VERTEX_PROBE_OBJECT": object_name,
-        }))
+        }
+        if location == "global" and self.target.allow_global_inference:
+            probe_env["MLR_VERTEX_PROBE_ALLOW_GLOBAL"] = "true"
+        env_file.write_text(json.dumps(probe_env))
         flags = workspace / "vertex-probe-flags.json"
         flags.write_text(json.dumps({
             "--region": self.target.region, "--service-account": self.target.runtime_sa,
@@ -812,6 +822,7 @@ class Deployment:
                 variables = workspace / "production.tfvars.json"
                 variables.write_text(json.dumps({"project_id": self.target.project_id, "region": self.target.region,
                                                  "vertex_ai_location": self.target.inference_location,
+                                                 "allow_global_inference": self.target.allow_global_inference,
                                                  "public_host": self.target.public_host, "app_image": image}))
                 with self.phase("initialize GCS Terraform backend and allocate public IP"):
                     self.runner.run([*self.tf, "init", "-input=false", "-no-color", "-reconfigure",

@@ -23,12 +23,24 @@ offline results when credentials, model availability, or provider calls fail.
 Terraform enables the Vertex AI API and grants the runtime service account
 `roles/aiplatform.user` in the selected project before creating the revision.
 `vertex_ai_location` controls inference separately from the deployment/storage
-`region`; its default preserves the region. The authorized `commsrx-ai` target
-uses `vertex_ai_location=us` for US-geography inference while Cloud Run, Cloud SQL,
-artifact storage, and secrets remain in `us-central1`. The configured models'
-Interactions endpoint rejected `us-central1` and supports `us`, `eu`, and `global`.
-This configuration explicitly rejects `global`; model support in the selected
-geography is verified by the synthetic runtime probe and live application tests.
+`region`; its default preserves the region. Global AI processing is rejected by
+default and requires both `vertex_ai_location=global` and the explicit boolean
+`allow_global_inference=true`. A Cloud Run lifecycle precondition blocks an
+unapproved global configuration, independently of the deployment driver's guard.
+
+The candidate target in this branch proposes global inference because the
+configured deep model (`gemini-3.1-pro-preview`) was not available through the US
+endpoint. Global processing has **no US-jurisdiction ML processing guarantee**:
+document and prompt contents sent to Gemini may be processed outside the US.
+Cloud Run, Cloud SQL, GCS artifacts, and secrets remain in `us-central1`; their
+storage location does not constrain the AI processing location. Model IDs,
+application authentication, and integration API shapes are unchanged.
+
+This candidate is a reviewable proposal, not deployment evidence. It must remain
+undeployed until the user explicitly approves the global processing choice. The
+synthetic runtime probe receives `MLR_VERTEX_PROBE_ALLOW_GLOBAL=true` only for an
+explicitly approved global target; live tests must still pass before release is
+reported successful.
 Veeva credentials are mounted only when `mount_veeva_credentials=true`; that
 optional mount has its own secret-scoped access grant and requires a real secret
 version before enabling it. CAMS and CommsRx do not require Veeva credentials.
