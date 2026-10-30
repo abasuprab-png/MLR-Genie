@@ -126,8 +126,7 @@ def bootstrap_sql(runtime_role: str) -> str:
 END $$;
 BEGIN;
 GRANT CONNECT ON DATABASE mlr_genie TO {role};
-CREATE SCHEMA IF NOT EXISTS mlr_genie AUTHORIZATION {role};
-ALTER SCHEMA mlr_genie OWNER TO {role};
+CREATE SCHEMA IF NOT EXISTS mlr_genie;
 GRANT USAGE, CREATE ON SCHEMA mlr_genie TO {role};
 COMMIT;
 """

@@ -93,7 +93,10 @@ def test_bootstrap_is_plain_sql_scoped_to_mlr_genie_and_quoted_iam_role():
     assert "\\set" not in sql and "\\if" not in sql
     assert "current_database()" in sql and "mlr_genie" in sql
     assert '"runtime""role@commsrx-ai.iam"' in sql
-    assert "CREATE SCHEMA IF NOT EXISTS mlr_genie AUTHORIZATION" in sql
+    assert "CREATE SCHEMA IF NOT EXISTS mlr_genie;" in sql
+    assert "AUTHORIZATION" not in sql
+    assert "ALTER SCHEMA" not in sql
+    assert "SET ROLE" not in sql
     assert "GRANT CONNECT ON DATABASE mlr_genie" in sql
     assert "GRANT USAGE, CREATE ON SCHEMA mlr_genie" in sql
     assert "PASSWORD" not in sql.upper()

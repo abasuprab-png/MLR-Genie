@@ -29,12 +29,23 @@ or access token is stored in Terraform variables, configuration, or state.
 
 ## Provision and bootstrap before starting the revision
 
-Schema ownership is a SQL operation, separate from Cloud IAM and the IAM SQL-user
+Schema grants are SQL operations, separate from Cloud IAM and the IAM SQL-user
 resource. An authorized database administrator must run [bootstrap.sql](bootstrap.sql)
-before the application starts. The administrator must be able to create the
-schema for, or assume, the runtime role. Runtime startup creates its own tables
-inside that pre-created schema and must not fall back to SQLite if PostgreSQL is
-unavailable.
+before the application starts. The administrator creates and retains ownership
+of the schema and grants the runtime role `USAGE` and `CREATE`. It does not need
+membership in, or permission to assume, the runtime role. Runtime startup creates
+and owns its tables inside that pre-created schema and must not fall back to
+SQLite if PostgreSQL is unavailable.
+
+The permission regression test uses an empty, disposable PostgreSQL 16 database
+named `mlr_genie`, separate from the ordinary storage-test database. It reproduces
+the old schema-authorization failure with a restricted administrator, then checks
+repeated bootstrap and runtime-owned table creation and job persistence:
+
+```sh
+MLR_GENIE_TEST_BOOTSTRAP_POSTGRES_URL='<disposable-admin-connection>' \
+  python -m pytest tests/test_postgres_bootstrap.py -q
+```
 
 Provision the database, its IAM role, runtime role bindings, artifact bucket,
 secrets, and required APIs first. On a first deployment, a reviewed staged
@@ -71,7 +82,7 @@ approved credential mechanism. Do not put credentials on the command line or in
 Terraform. An IAM administrator may use the proxy's `--auto-iam-authn` option and
 its own appropriately privileged database role instead.
 
-Before routing production traffic, verify schema ownership, runtime IAM login,
+Before routing production traffic, verify schema grants, runtime IAM login,
 table creation, and persistence of job JSON, stored receipts, and private artifact
 manifests through independent connections.
 Create artifacts on one revision and download them from another, then replace a
