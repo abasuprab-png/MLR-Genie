@@ -692,6 +692,122 @@ def test_direct_cloud_run_network_error_cannot_count_as_ingress_rejection(tmp_pa
     assert "direct_cloud_run_ingress_blocked" not in current.report["checks"]
 
 
+def runtime_probe_deployment(tmp_path, *, result_changes=None, identity=None, execution_error=False, cleanup_error=False):
+    observed = {}
+    probe_result = {
+        "project_id": "commsrx-ai", "location": "us-central1", "model": "gemini-3.5-flash-lite",
+        "effective_model": "gemini-3.5-flash-lite", "status": "passed", "used_live_sdk": True,
+        "provider_http_status": None, "error_message": "", **(result_changes or {}),
+    }
+    runtime = "mlr-genie-adk-runtime@commsrx-ai.iam.gserviceaccount.com"
+
+    def handler(args, kwargs):
+        if args[1:5] == ["run", "services", "describe", "mlr-genie-adk-app"]:
+            return completed(args, data={"spec": {"template": {"spec": {
+                "serviceAccountName": identity or runtime,
+                "containers": [{"env": [
+                    {"name": "GOOGLE_CLOUD_PROJECT", "value": "commsrx-ai"},
+                    {"name": "GOOGLE_CLOUD_LOCATION", "value": "us-central1"},
+                    {"name": "MLR_GENIE_BOOTSTRAP_SECRET", "value": "must-not-reach-probe"},
+                ]}],
+            }}}})
+        if args[1:4] == ["run", "jobs", "create"]:
+            flags_path = next(item.removeprefix("--flags-file=") for item in args if item.startswith("--flags-file="))
+            observed["flags"] = json.loads(Path(flags_path).read_text())
+            observed["env"] = json.loads(Path(observed["flags"]["--env-vars-file"]).read_text())
+            observed["job"] = args[4]
+            return completed(args)
+        if args[1:4] == ["run", "jobs", "execute"]:
+            if execution_error:
+                raise _driver.DeploymentError("Probe execution failed")
+            return completed(args)
+        if args[1:3] == ["storage", "cat"]:
+            assert kwargs["sensitive"] is True
+            observed["uri"] = args[3]
+            return completed(args, data=probe_result)
+        if args[1:4] == ["run", "jobs", "delete"]:
+            observed["deleted_job"] = args[4]
+            if cleanup_error:
+                raise _driver.DeploymentError("Probe cleanup denied")
+            return completed(args)
+        if args[1:4] == ["storage", "objects", "describe"]:
+            return completed(args, stdout="42\n")
+        if args[1:3] == ["storage", "rm"]:
+            observed["deleted_object"] = args[3]
+            return completed(args)
+        raise AssertionError(args)
+
+    current = deployment(tmp_path, FakeRunner(handler))
+    current.report.update(commit="e" * 40, image="us-central1-docker.pkg.dev/commsrx-ai/mlr-genie/app@sha256:" + "a" * 64)
+    source = tmp_path / "deploy/automation/vertex_probe.py"
+    source.parent.mkdir(parents=True)
+    source.write_text("print('fixed synthetic probe')\n")
+    workspace = tmp_path / "private-workspace"
+    workspace.mkdir()
+    return current, workspace, observed
+
+
+def test_runtime_probe_uses_app_identity_exact_image_and_only_public_probe_environment(tmp_path):
+    current, workspace, observed = runtime_probe_deployment(tmp_path)
+    current.vertex_probe(workspace)
+    flags, env = observed["flags"], observed["env"]
+    assert flags["--service-account"] == current.target.runtime_sa
+    assert flags["--image"] == current.report["image"]
+    assert flags["--command"] == ["python"] and flags["--args"] == ["-c", "print('fixed synthetic probe')\n"]
+    assert flags["--max-retries"] == 0 and flags["--task-timeout"] == "180s"
+    assert set(env) == {"GOOGLE_CLOUD_PROJECT", "GOOGLE_CLOUD_LOCATION", "GOOGLE_GENAI_USE_VERTEXAI",
+                        "GOOGLE_GENAI_LIVE_VERTEX", "MLR_VERTEX_PROBE_BUCKET", "MLR_VERTEX_PROBE_OBJECT"}
+    assert "must-not-reach-probe" not in json.dumps(flags) + json.dumps(env)
+    assert observed["deleted_job"] == observed["job"]
+    assert observed["uri"].startswith("gs://commsrx-ai-mlr-versioned-artifacts/deployment-probes/")
+    assert observed["deleted_object"] == observed["uri"] + "#42"
+    assert current.report["checks"]["runtime_identity_live_vertex_probe"] is True
+
+
+def test_provider_probe_failure_preserves_diagnostic_and_still_removes_temporary_resources(tmp_path):
+    current, workspace, observed = runtime_probe_deployment(tmp_path, result_changes={
+        "status": "provider_error", "used_live_sdk": False, "provider_http_status": 400,
+        "error_message": "Regional provider rejected this synthetic request.",
+    })
+    with pytest.raises(_driver.DeploymentError, match="Regional provider rejected"):
+        current.vertex_probe(workspace)
+    evidence = json.loads((tmp_path / "evidence/vertex-probe.json").read_text())
+    assert evidence["provider_http_status"] == 400
+    assert observed["deleted_job"] == observed["job"]
+    assert observed["deleted_object"].endswith("#42")
+    assert "runtime_identity_live_vertex_probe" not in current.report["checks"]
+
+
+def test_failed_probe_execution_still_cleans_up_exact_job_and_output_generation(tmp_path):
+    current, workspace, observed = runtime_probe_deployment(tmp_path, execution_error=True)
+    with pytest.raises(_driver.DeploymentError, match="Probe execution failed"):
+        current.vertex_probe(workspace)
+    assert observed["deleted_job"] == observed["job"]
+    assert observed["deleted_object"].endswith("#42")
+
+
+def test_probe_refuses_wrong_serving_identity_before_creating_resources(tmp_path):
+    current, workspace, observed = runtime_probe_deployment(tmp_path, identity="other@commsrx-ai.iam.gserviceaccount.com")
+    with pytest.raises(_driver.DeploymentError, match="runtime identity"):
+        current.vertex_probe(workspace)
+    assert "job" not in observed
+
+
+def test_probe_rejects_unexpected_output_fields_and_reports_cleanup_failure(tmp_path):
+    current, workspace, observed = runtime_probe_deployment(tmp_path, result_changes={"unexpected": "do not retain"})
+    with pytest.raises(_driver.DeploymentError, match="evidence does not match"):
+        current.vertex_probe(workspace)
+    assert not (tmp_path / "evidence/vertex-probe.json").exists()
+    assert observed["deleted_job"] == observed["job"]
+
+
+def test_probe_cleanup_failure_blocks_success_and_records_owned_job_name(tmp_path):
+    current, workspace, observed = runtime_probe_deployment(tmp_path, cleanup_error=True)
+    with pytest.raises(_driver.DeploymentError, match="cleanup needs attention"):
+        current.vertex_probe(workspace)
+    assert observed["job"] in current.report["cleanup_required"][0]
+
+
 @pytest.mark.parametrize("commit,state", [("not-a-sha", "pending"), ("e" * 40, "error")])
 def test_public_ip_status_rejects_invalid_commit_or_state_before_network(tmp_path, monkeypatch, commit, state):
     current = public_ip_deployment(tmp_path, monkeypatch)

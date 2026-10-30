@@ -155,6 +155,7 @@ jobs:
           path: |
             deployment-output/report.json
             deployment-output/plan-summary.json
+            deployment-output/vertex-probe.json
             deployment-output/integrations.json
             deployment-output/journal/result.json
             deployment-output/persistence.json
