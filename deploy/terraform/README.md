@@ -19,8 +19,13 @@ creation (`GOOGLE_GENAI_USE_VERTEXAI=true` and `GOOGLE_GENAI_LIVE_VERTEX=true`).
 offline results when credentials, model availability, or provider calls fail.
 Terraform enables the Vertex AI API and grants the runtime service account
 `roles/aiplatform.user` in the selected project before creating the revision.
-The existing Veeva environment-secret reference also has its own secret-scoped
-access grant. Its secret version remains a deployment prerequisite.
+Veeva credentials are mounted only when `mount_veeva_credentials=true`; that
+optional mount has its own secret-scoped access grant and requires a real secret
+version before enabling it. CAMS and CommsRx do not require Veeva credentials.
+
+The container defaults to 2 GiB memory and four concurrent requests per instance
+for PDF processing and temporary artifact staging. These settings are configurable
+with `runtime_memory` and `runtime_request_concurrency`.
 
 ## Durable storage configuration
 
@@ -67,8 +72,9 @@ Manager, and required image/provider APIs in that project. The deployment actor
 needs the corresponding resource-management and service-account permissions;
 an organization policy that forbids `allUsers` invocation must be resolved for
 this application-authenticated architecture before rollout. Populate the
-existing signing, bootstrap, and Veeva Secret Manager versions outside Terraform
-before starting the revision. No secret values belong in plans or state.
+signing and bootstrap Secret Manager versions outside Terraform before starting
+the revision. Supply Veeva credentials only if its optional mount
+is enabled. No secret values belong in plans or state.
 Complete the PostgreSQL schema bootstrap before the first revision. Existing
 SQLite jobs and local artifacts are not migrated merely by changing environment
 variables; follow the migration checks in the database operations guide.
@@ -97,3 +103,8 @@ provides a checked publisher PDF, reworded claim, source hash, and a reusable
 `evals/live_journal_verification.py --base-url https://<host>` command for that
 final requester test. Its existing local evidence is explicitly separate from
 production verification.
+
+For the authorized `commsrx-ai` deployment, the keyless release workflow and
+the private GCS Terraform backend are documented in
+[deployment automation](../automation/README.md). The deployment driver reports
+the load-balancer IP before waiting for external DNS and the managed certificate.

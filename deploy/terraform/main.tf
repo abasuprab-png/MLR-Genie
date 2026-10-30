@@ -39,6 +39,28 @@ variable "app_image" {
   }
 }
 
+variable "mount_veeva_credentials" {
+  description = "Mount separately provisioned Veeva credentials only when that connector is configured"
+  type        = bool
+  default     = false
+}
+
+variable "runtime_memory" {
+  description = "Memory for document processing and request-local artifact staging"
+  type        = string
+  default     = "2Gi"
+}
+
+variable "runtime_request_concurrency" {
+  description = "Bound simultaneous PDF jobs per instance to limit memory pressure"
+  type        = number
+  default     = 4
+  validation {
+    condition     = var.runtime_request_concurrency >= 1 && var.runtime_request_concurrency <= 1000 && floor(var.runtime_request_concurrency) == var.runtime_request_concurrency
+    error_message = "runtime_request_concurrency must be an integer from 1 to 1000."
+  }
+}
+
 provider "google" {
   project = var.project_id
   region  = var.region
@@ -138,6 +160,7 @@ resource "google_secret_manager_secret_iam_member" "auth_runtime_access" {
 
 # Cloud Run resolves this existing environment secret before starting a revision.
 resource "google_secret_manager_secret_iam_member" "veeva_runtime_access" {
+  count     = var.mount_veeva_credentials ? 1 : 0
   secret_id = google_secret_manager_secret.veeva_vault_credentials.secret_id
   role      = "roles/secretmanager.secretAccessor"
   member    = "serviceAccount:${google_service_account.mlr_genie_runtime_sa.email}"
@@ -161,8 +184,9 @@ resource "google_cloud_run_v2_service" "mlr_genie_service" {
   ]
 
   template {
-    service_account       = google_service_account.mlr_genie_runtime_sa.email
-    execution_environment = "EXECUTION_ENVIRONMENT_GEN2"
+    service_account                  = google_service_account.mlr_genie_runtime_sa.email
+    execution_environment            = "EXECUTION_ENVIRONMENT_GEN2"
+    max_instance_request_concurrency = var.runtime_request_concurrency
 
     volumes {
       name = "cloudsql"
@@ -178,6 +202,13 @@ resource "google_cloud_run_v2_service" "mlr_genie_service" {
 
     containers {
       image = var.app_image
+
+      resources {
+        limits = {
+          cpu    = "1"
+          memory = var.runtime_memory
+        }
+      }
 
       volume_mounts {
         name       = "cloudsql"
@@ -256,12 +287,15 @@ resource "google_cloud_run_v2_service" "mlr_genie_service" {
         name  = "MLR_GCS_BUCKET"
         value = "gs://${google_storage_bucket.mlr_artifacts_bucket.name}"
       }
-      env {
-        name = "VEEVA_OAUTH_SECRET"
-        value_source {
-          secret_key_ref {
-            secret  = google_secret_manager_secret.veeva_vault_credentials.secret_id
-            version = "latest"
+      dynamic "env" {
+        for_each = var.mount_veeva_credentials ? [true] : []
+        content {
+          name = "VEEVA_OAUTH_SECRET"
+          value_source {
+            secret_key_ref {
+              secret  = google_secret_manager_secret.veeva_vault_credentials.secret_id
+              version = "latest"
+            }
           }
         }
       }

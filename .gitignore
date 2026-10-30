@@ -7,6 +7,8 @@ __pycache__/
 *.db
 *.sqlite3
 .env
+gha-creds-*.json
+deployment-output/
 .DS_Store
 artifacts/file_roundtrip/*
 !artifacts/file_roundtrip/job_demo_aurenix_round_1/
