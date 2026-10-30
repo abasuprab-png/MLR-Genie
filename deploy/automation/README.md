@@ -98,7 +98,12 @@ gcloud compute addresses describe mlr-genie-https --global \
 Deployment waits for the managed certificate and public health/auth checks, runs
 the live TypeScript integration and real-journal evaluations, then verifies the
 same job, all four artifact hashes, and individual reviewer provenance after a
-same-image Cloud Run revision replacement. The workflow retains only five
+same-image Cloud Run revision replacement. A short-lived Cloud Run job first
+probes Vertex with fixed public synthetic text under the application's runtime
+identity. Its bounded, redacted diagnostic helps distinguish provider rejection
+from application failures; it does not read documents or authentication secrets.
+The temporary job and exact GCS object generation are removed after collection.
+The workflow retains only six
 explicitly allowlisted sanitized reports; credentials, Terraform state, raw
 plans, and raw command logs are excluded. Missing access, DNS, model availability,
 or failed checks produce a failed stage rather than a deployment-success claim.

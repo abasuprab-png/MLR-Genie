@@ -601,6 +601,87 @@ class Deployment:
             time.sleep(30)
         raise DeploymentError("Public HTTPS readiness deadline expired; check DNS A/proxy settings, certificate status and Cloud Run startup.")
 
+    def vertex_probe(self, workspace: Path) -> None:
+        """Diagnose the live SDK with public synthetic input under the runtime identity."""
+        service = self.cloud_json("run", "services", "describe", "mlr-genie-adk-app",
+                                  "--region=" + self.target.region)
+        spec = service.get("spec", {}).get("template", {}).get("spec", {})
+        if spec.get("serviceAccountName") != self.target.runtime_sa:
+            raise DeploymentError("Vertex probe runtime identity does not match the serving application.")
+        containers = spec.get("containers", [])
+        if len(containers) != 1:
+            raise DeploymentError("Vertex probe requires the single application container.")
+        deployed_env = {item.get("name"): item.get("value") for item in containers[0].get("env", [])}
+        location = deployed_env.get("GOOGLE_CLOUD_LOCATION", "")
+        if (deployed_env.get("GOOGLE_CLOUD_PROJECT") != self.target.project_id
+                or location != self.target.region):
+            raise DeploymentError("Vertex probe must preserve the configured project and regional processing location.")
+        bucket = self.target.project_id + "-mlr-versioned-artifacts"
+        suffix = self.report["commit"][:8] + "-" + secrets.token_hex(4)
+        job_name = "mlr-genie-vertex-probe-" + suffix
+        object_name = "deployment-probes/" + suffix + ".json"
+        uri = "gs://" + bucket + "/" + object_name
+        env_file = workspace / "vertex-probe-env.json"
+        env_file.write_text(json.dumps({
+            "GOOGLE_CLOUD_PROJECT": self.target.project_id,
+            "GOOGLE_CLOUD_LOCATION": location,
+            "GOOGLE_GENAI_USE_VERTEXAI": "true", "GOOGLE_GENAI_LIVE_VERTEX": "true",
+            "MLR_VERTEX_PROBE_BUCKET": bucket, "MLR_VERTEX_PROBE_OBJECT": object_name,
+        }))
+        flags = workspace / "vertex-probe-flags.json"
+        flags.write_text(json.dumps({
+            "--region": self.target.region, "--service-account": self.target.runtime_sa,
+            "--image": self.report["image"], "--command": ["python"],
+            "--args": ["-c", (self.root / "deploy/automation/vertex_probe.py").read_text()],
+            "--env-vars-file": str(env_file), "--tasks": 1, "--parallelism": 1,
+            "--max-retries": 0, "--task-timeout": "180s", "--cpu": "1", "--memory": "512Mi",
+            "--labels": {"app": "mlr-genie", "component": "vertex-probe"},
+        }))
+        created = False
+        try:
+            self.gcloud("run", "jobs", "create", job_name, "--flags-file=" + str(flags), timeout=600)
+            created = True
+            self.gcloud("run", "jobs", "execute", job_name, "--region=" + self.target.region,
+                        "--wait", timeout=300)
+            result = json.loads(self.gcloud("storage", "cat", uri, sensitive=True).stdout)
+            allowed = {"project_id", "location", "model", "effective_model", "used_live_sdk", "status",
+                       "provider_http_status", "error_message"}
+            if (not isinstance(result, dict) or set(result) - allowed
+                    or result.get("project_id") != self.target.project_id or result.get("location") != location):
+                raise DeploymentError("Vertex probe evidence does not match the serving project and region.")
+            self.write("vertex-probe.json", result)
+            self.report["vertex_probe"] = {"runtime_identity": self.target.runtime_sa,
+                                            "image": self.report["image"], **result}
+            self.flush()
+            if result.get("status") != "passed" or result.get("used_live_sdk") is not True:
+                # Input is a fixed public synthetic sentence; the helper redacts
+                # credentials and bounds the provider diagnostic before upload.
+                raise DeploymentError("Synthetic runtime Vertex probe failed: " +
+                                      self.sanitizer.clean(str(result.get("error_message", "No provider diagnostic.")))[:2000])
+            self.report["checks"]["runtime_identity_live_vertex_probe"] = True
+            self.flush()
+        finally:
+            failures = []
+            if created:
+                try:
+                    self.gcloud("run", "jobs", "delete", job_name, "--region=" + self.target.region, timeout=300)
+                except DeploymentError:
+                    failures.append("temporary Vertex probe job " + job_name)
+                try:
+                    metadata = self.gcloud("storage", "objects", "describe", uri,
+                                           "--format=value(generation)", check=False)
+                    generation = metadata.stdout.strip()
+                    if metadata.returncode == 0 and generation.isdigit():
+                        self.gcloud("storage", "rm", uri + "#" + generation)
+                    elif metadata.returncode == 0 or not re.search(r"(?i)(\b404\b|not found|does not exist)", metadata.stderr):
+                        failures.append("temporary Vertex probe object " + object_name)
+                except DeploymentError:
+                    failures.append("temporary Vertex probe object " + object_name)
+            if failures:
+                self.report.setdefault("cleanup_required", []).extend(failures)
+                self.flush()
+                raise DeploymentError("Vertex probe cleanup needs attention: " + ", ".join(failures))
+
     def integration_eval(self, bootstrap: str) -> dict:
         env = {**os.environ, "MLR_GENIE_BOOTSTRAP_SECRET": bootstrap}
         result = self.runner.run([sys.executable, "evals/live_integrations.py", "--base-url", self.report["public_url"]], env=env, timeout=1800)
@@ -744,6 +825,8 @@ class Deployment:
                     self.verify_cloud_run_access()
                 with self.phase("wait for managed certificate and protected public HTTPS endpoint"):
                     self.wait_until_ready()
+                with self.phase("probe live Vertex AI under the application runtime identity"):
+                    self.vertex_probe(workspace)
                 bootstrap = self.read_bootstrap_secret()
                 with self.phase("verify live TypeScript CAMS and CommsRx roundtrip"):
                     evidence = self.integration_eval(bootstrap)
