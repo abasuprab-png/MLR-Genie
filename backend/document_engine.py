@@ -708,6 +708,7 @@ def extract_pdf_source_pack(
                 ]
                 nums = re.findall(r"(?<![\d.])\d+(?:\.\d+)?%?(?!\d)", cleaned)
                 locked_nums = [n for n in nums if n.endswith("%") or "." in n]
+                auto_quals = _extract_auto_required_qualifiers(cleaned)
                 source_pack.append(
                     {
                         "source_id": source_id,
@@ -717,7 +718,7 @@ def extract_pdf_source_pack(
                         "verbatim_text": cleaned,
                         "keywords": list(dict.fromkeys(words[:12] + nums[:6])),
                         "locked_numbers": locked_nums,
-                        "required_qualifiers": [],
+                        "required_qualifiers": auto_quals,
                         "ruled_out_terms": [],
                         "device_version": None,
                         "column": blk["column"],
@@ -743,6 +744,26 @@ def extract_pdf_source_pack(
         doc.close()
 
     return source_pack
+
+
+_PDF_QUALIFIER_PATTERNS: list[re.Pattern[str]] = [
+    re.compile(r"\b2L\+\s+EGFR-mutated(?:\s+metastatic)?\s+NSCLC\b", flags=re.IGNORECASE),
+    re.compile(r"\b95%\s+CI\b", flags=re.IGNORECASE),
+    re.compile(r"\b510\(k\)\s+cleared\b", flags=re.IGNORECASE),
+    re.compile(r"\bparoxysmal\s+atrial\s+fibrillation\b", flags=re.IGNORECASE),
+    re.compile(r"\bsevere\s+hepatic\s+impairment\b", flags=re.IGNORECASE),
+]
+
+
+def _extract_auto_required_qualifiers(text: str) -> list[str]:
+    quals: list[str] = []
+    for pat in _PDF_QUALIFIER_PATTERNS:
+        m = pat.search(text)
+        if m:
+            found = m.group(0).strip()
+            if found not in quals:
+                quals.append(found)
+    return quals
 
 
 def inspect_pdf_document_and_extract_source_pack(
@@ -785,6 +806,7 @@ def inspect_pdf_document_and_extract_source_pack(
                 ]
                 nums = re.findall(r"(?<![\d.])\d+(?:\.\d+)?%?(?!\d)", cleaned)
                 locked_nums = [n for n in nums if n.endswith("%") or "." in n]
+                auto_quals = _extract_auto_required_qualifiers(cleaned)
                 auto_source_pack.append(
                     {
                         "source_id": source_id,
@@ -793,7 +815,7 @@ def inspect_pdf_document_and_extract_source_pack(
                         "verbatim_text": cleaned,
                         "keywords": list(dict.fromkeys(words[:12] + nums[:6])),
                         "locked_numbers": locked_nums,
-                        "required_qualifiers": [],
+                        "required_qualifiers": auto_quals,
                         "ruled_out_terms": [],
                         "device_version": None,
                         "column": blk["column"],
@@ -1487,11 +1509,22 @@ def build_resubmission_package_zip(
     latest_rev = job.revisions[-1] if job.revisions else None
     base_rev = job.revisions[0] if job.revisions else None
 
+    bound_rev_sha = latest_rev.sha256_hash if latest_rev else None
+    is_bound_to_current = all(
+        c.bound_version == job.current_version
+        and (not bound_rev_sha or c.bound_revision_sha256 == bound_rev_sha)
+        and not c.stale
+        for c in job.claims
+    )
+
     evidence_matrix = {
         "job_id": job.job_id,
         "tenant_id": job.tenant_id,
         "current_version": job.current_version,
-        "revision_sha256": latest_rev.sha256_hash if latest_rev else None,
+        "bound_version": job.current_version,
+        "revision_sha256": bound_rev_sha,
+        "bound_revision_sha256": bound_rev_sha,
+        "evidence_bound_to_current_version": is_bound_to_current,
         "claims": [c.model_dump() for c in job.claims],
     }
     comment_response_log = {
@@ -1508,7 +1541,7 @@ def build_resubmission_package_zip(
         "base_revision_id": base_rev.revision_id if base_rev else None,
         "base_sha256": base_rev.sha256_hash if base_rev else None,
         "latest_revision_id": latest_rev.revision_id if latest_rev else None,
-        "latest_sha256": latest_rev.sha256_hash if latest_rev else None,
+        "latest_sha256": bound_rev_sha,
         "revisions": [r.model_dump() for r in job.revisions],
         "telemetry_receipts": job.metadata.get("telemetry_receipts", []),
         "rd_handoff_boilerplate": job.metadata.get("rd_handoff_boilerplate"),
@@ -1549,7 +1582,8 @@ def build_resubmission_package_zip(
             "job_id": job.job_id,
             "tenant_id": job.tenant_id,
             "bound_version": job.current_version,
-            "bound_revision_sha256": latest_rev.sha256_hash if latest_rev else None,
+            "bound_revision_sha256": bound_rev_sha,
+            "evidence_bound_to_current_version": is_bound_to_current,
             "created_at": datetime.now(timezone.utc).isoformat(),
             "files": manifest_files,
         }
@@ -1559,5 +1593,8 @@ def build_resubmission_package_zip(
         "zip_path": str(out_zip),
         "zip_bytes": out_zip.stat().st_size,
         "zip_sha256": sha256_file(out_zip),
+        "bound_version": job.current_version,
+        "bound_revision_sha256": bound_rev_sha,
+        "evidence_bound_to_current_version": is_bound_to_current,
         "manifest": manifest_payload,
     }

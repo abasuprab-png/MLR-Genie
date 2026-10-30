@@ -211,6 +211,9 @@ class ClaimAssessment(BaseModel):
     plain_english_diagnosis: str = ""
     anchors: list[PdfBoundingBox] = Field(default_factory=list)
     model_used: str = "gemini-4-argon"
+    bound_version: int = 1
+    bound_revision_sha256: str = ""
+    stale: bool = False
 
     @property
     def plain_english_rationale(self) -> str:
@@ -373,6 +376,33 @@ class ClientProfile(BaseModel):
     confirmed_by_owner: str
 
 
+class SourcePackList(list):
+    """
+    List of source_pack entry dicts that also supports `["entries"]` and `.get("entries")`
+    access and assignment so callers using either `list` or `{"entries": [...]}` semantics work seamlessly.
+    """
+
+    def __getitem__(self, key: Any) -> Any:
+        if isinstance(key, str):
+            if key == "entries":
+                return list(self)
+            raise KeyError(key)
+        return super().__getitem__(key)
+
+    def __setitem__(self, key: Any, value: Any) -> None:
+        if isinstance(key, str):
+            if key == "entries":
+                self[:] = list(value)
+                return
+            raise KeyError(key)
+        super().__setitem__(key, value)
+
+    def get(self, key: str, default: Any = None) -> Any:
+        if key == "entries":
+            return list(self)
+        return default
+
+
 class JobRecord(BaseModel):
     """Authoritative job record stored outside conversational memory (Section 2, 3, 8)."""
 
@@ -403,7 +433,7 @@ class JobRecord(BaseModel):
     audience: str = "HCP & Medical Media"
     channel: str = ""
     product_version: str = "Aurenix-80mg-v1"
-    source_pack: list[dict[str, Any]] = Field(default_factory=list)
+    source_pack: list[dict[str, Any]] = Field(default_factory=SourcePackList)
     rd_handoff_boilerplate: str = ""
     reuse_library: list[StatementReuseRecord] = Field(default_factory=list)
     revisions: list[AssetRevisionSnapshot] = Field(default_factory=list)
@@ -414,3 +444,19 @@ class JobRecord(BaseModel):
     pv_icrs_flagged: bool = False
     pv_routing_note: str | None = None
     approved_handoff_bundle_uri: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_source_pack_input(cls, data: Any) -> Any:
+        if isinstance(data, dict) and isinstance(data.get("source_pack"), dict):
+            out = dict(data)
+            out["source_pack"] = list(data["source_pack"].get("entries", []))
+            return out
+        return data
+
+    @model_validator(mode="after")
+    def _wrap_source_pack_list(self) -> "JobRecord":
+        if not isinstance(self.source_pack, SourcePackList):
+            object.__setattr__(self, "source_pack", SourcePackList(self.source_pack))
+        return self
+

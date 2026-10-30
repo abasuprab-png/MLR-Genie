@@ -20,10 +20,12 @@ from backend.domain.schemas import (
     ReviewComment,
     SectorType,
     SourceAnchor,
+    SourcePackList,
     StatementReuseRecord,
     SupportClassification,
     WordingSpanEdit,
 )
+
 
 
 _MEDICAL_ABBREV_PATTERN = re.compile(
@@ -52,16 +54,23 @@ def compute_sha256(content: str | bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+_JOB_ACTIVE_ROUTERS: dict[str, GeminiModelRouter] = {}
+
+
 def ingest_working_document(
     *,
     job: JobRecord,
     body_text: str,
     actor: str,
     event_type: ProvenanceEventType = ProvenanceEventType.ASSET_EDIT_RECORDED,
+    reverify_claims: bool = True,
 ) -> AssetRevisionSnapshot:
     """
     Section 3.B — Accepts working file content, preserves original cryptographic hash,
     and appends a revision snapshot with explicit provenance.
+    When a new revision is recorded (`next_version > 1`), existing claim assessments are
+    marked `stale=True` and, if `job.source_pack` has active source entries, claims are
+    automatically re-verified against the new revision body.
     """
     next_version = len(job.revisions) + 1
     snapshot = AssetRevisionSnapshot(
@@ -82,6 +91,21 @@ def ingest_working_document(
     ):
         job.state = JobLifecycleState.DRAFT
         job.approved_handoff_bundle_uri = None
+
+    if next_version > 1:
+        for existing_claim in job.claims:
+            existing_claim.stale = True
+        has_sources = bool(
+            job.source_pack.get("entries")
+            if isinstance(job.source_pack, dict)
+            else job.source_pack
+        )
+        if reverify_claims and has_sources:
+            locate_and_anchor_evidence(
+                job=job,
+                source_pack=job.source_pack,
+                router=_JOB_ACTIVE_ROUTERS.get(job.job_id),
+            )
     return snapshot
 
 
@@ -222,10 +246,31 @@ _NEGATION_PATTERN = re.compile(
 _NUM_TOKEN_PATTERN = re.compile(r"(?<![\d.])\d+(?:\.\d+)?%?(?!\d)")
 
 _POPULATION_PATTERN = re.compile(
-    r"\b(?:in|among|for)\s+([^,.();]+?(?:NSCLC|patients|adults|adolescents|subjects|cohort|population|"
-    r"impairment|carcinoma|lymphoma|melanoma|diabetes|asthma|arthritis|setting)[^,.();]*)",
+    r"\b(?:in|among|for|across|of)\s+((?:[a-zA-Z0-9.+/-]+\s+){0,5}?(?:NSCLC|patients|adults|children|child|"
+    r"pediatric(?:\s+patients)?|paediatric(?:\s+patients)?|adolescents|infants|neonates|"
+    r"elderly|geriatric|subjects|cohort|population|impairment|carcinoma|lymphoma|"
+    r"melanoma|diabetes|asthma|arthritis|setting|americans|women|men)"
+    r"(?:\s+(?:with|in|following|receiving)\s+[^,.();]+)?)",
     flags=re.IGNORECASE,
 )
+
+_STANDALONE_POPULATION_PATTERN = re.compile(
+    r"\b((?:pediatric|paediatric|elderly|geriatric|adult|adolescent)\s+patients|"
+    r"U\.S\.\s+adults|2L\+\s+EGFR-mutated(?:\s+metastatic)?\s+NSCLC|"
+    r"pediatric|paediatric|adolescents|children|adults|elderly|geriatric|americans)\b",
+    flags=re.IGNORECASE,
+)
+
+
+def _extract_population_phrase(text: str) -> str:
+    m = _POPULATION_PATTERN.search(text)
+    if m:
+        return m.group(1).strip()
+    m2 = _STANDALONE_POPULATION_PATTERN.search(text)
+    if m2:
+        return m2.group(1).strip()
+    return ""
+
 
 _ENDPOINT_PATTERN = re.compile(
     r"\b(progression-free survival(?:\s+risk)?|overall survival|objective response rate|duration of response|"
@@ -245,6 +290,24 @@ _TIMEFRAME_PATTERN = re.compile(
     flags=re.IGNORECASE,
 )
 
+_BENEFICIAL_OR_UPWARD_DIR_PATTERN = re.compile(
+    r"\b(improved|improves|improvement|prolonged|prolongs|extended|extends|"
+    r"increased|increases|increase|elevated|raised)\b",
+    flags=re.IGNORECASE,
+)
+_DETRIMENTAL_DIR_PATTERN = re.compile(
+    r"\b(worsened|worsens|worsening|deteriorated|shortened|shortens)\b",
+    flags=re.IGNORECASE,
+)
+_DOWNWARD_DIR_PATTERN = re.compile(
+    r"\b(decreased|decreases|decrease|reduced|reduces|reduction|lowered|lowers|declined|decline)\b",
+    flags=re.IGNORECASE,
+)
+_UPWARD_ONLY_DIR_PATTERN = re.compile(
+    r"\b(increased|increases|increase|elevated|raised)\b",
+    flags=re.IGNORECASE,
+)
+
 
 def _has_semantic_negation_conflict(source_text: str, claim_text: str) -> bool:
     """
@@ -254,6 +317,217 @@ def _has_semantic_negation_conflict(source_text: str, claim_text: str) -> bool:
     src_negated = bool(_NEGATION_PATTERN.search(source_text))
     claim_negated = bool(_NEGATION_PATTERN.search(claim_text))
     return src_negated != claim_negated
+
+
+def _has_direction_conflict(source_text: str, claim_text: str) -> str | None:
+    """
+    Detects antonymic clinical direction reversals between source and claim:
+    - 'improved' / 'prolonged' / 'increased' / 'reduced' vs 'worsened' / 'shortened' / 'deteriorated'
+    - 'increased' / 'improved' vs 'decreased' / 'reduced' / 'lowered' (when source has no downward term)
+    - 'decreased' / 'reduced' / 'reduction' vs 'increased' / 'elevated' (when source has no upward term)
+    """
+    src_ben_up = _BENEFICIAL_OR_UPWARD_DIR_PATTERN.findall(source_text)
+    src_det = _DETRIMENTAL_DIR_PATTERN.findall(source_text)
+    src_down = _DOWNWARD_DIR_PATTERN.findall(source_text)
+    src_up_only = _UPWARD_ONLY_DIR_PATTERN.findall(source_text)
+
+    clm_ben_up = _BENEFICIAL_OR_UPWARD_DIR_PATTERN.findall(claim_text)
+    clm_det = _DETRIMENTAL_DIR_PATTERN.findall(claim_text)
+    clm_down = _DOWNWARD_DIR_PATTERN.findall(claim_text)
+    clm_up_only = _UPWARD_ONLY_DIR_PATTERN.findall(claim_text)
+
+    if clm_det and (src_ben_up or src_down) and not src_det:
+        src_ref = src_ben_up[0] if src_ben_up else src_down[0]
+        return (
+            f"Contradicts clinical source: Direction mismatch (claim states '{clm_det[0]}' "
+            f"but source states '{src_ref}')."
+        )
+    if (clm_ben_up or clm_down) and src_det and not clm_det:
+        clm_ref = clm_ben_up[0] if clm_ben_up else clm_down[0]
+        return (
+            f"Contradicts clinical source: Direction mismatch (claim states '{clm_ref}' "
+            f"but source states '{src_det[0]}')."
+        )
+    if clm_down and src_ben_up and not src_down and not src_det:
+        return (
+            f"Contradicts clinical source: Direction mismatch (claim states '{clm_down[0]}' "
+            f"but source states '{src_ben_up[0]}')."
+        )
+    if clm_up_only and src_down and not src_up_only:
+        return (
+            f"Contradicts clinical source: Direction mismatch (claim states '{clm_up_only[0]}' "
+            f"but source states '{src_down[0]}')."
+        )
+    return None
+
+
+def _extract_demographic_and_line_groups(text: str) -> tuple[set[str], set[str]]:
+    low = text.lower()
+    demo_groups: set[str] = set()
+    if re.search(r"\b(children|child|pediatric|paediatric|infants?|neonates?|toddlers?)\b", low):
+        demo_groups.add("pediatric")
+    if re.search(r"\b(adolescents?|teens?|teenagers?)\b", low):
+        demo_groups.add("adolescent")
+    if re.search(r"\b(adults?)\b", low):
+        demo_groups.add("adult")
+    if re.search(r"\b(elderly|geriatric|older\s+adults?)\b", low):
+        demo_groups.add("elderly")
+
+    line_groups: set[str] = set()
+    if re.search(r"\b(1l|first-line|1st-line|treatment-naive|untreated)\b", low):
+        line_groups.add("1L")
+    if re.search(r"\b(2l\+|2l|3l|second-line|2nd-line|relapsed|refractory)\b", low):
+        line_groups.add("2L+")
+    return demo_groups, line_groups
+
+
+def _has_population_conflict(
+    source_text: str,
+    claim_text: str,
+    explicit_source_pop: str = "",
+) -> str | None:
+    """
+    Detects contradictory population or line-of-therapy switches between source and claim
+    (e.g., 'in children' / 'pediatric' vs 'in adults', or '1L' vs '2L+').
+    """
+    src_combined = f"{source_text} {explicit_source_pop}".strip()
+    src_demo, src_line = _extract_demographic_and_line_groups(src_combined)
+    clm_demo, clm_line = _extract_demographic_and_line_groups(claim_text)
+
+    if clm_demo and src_demo and not (clm_demo & src_demo):
+        clm_desc = _extract_population_phrase(claim_text) or ", ".join(sorted(clm_demo))
+        src_desc = (
+            explicit_source_pop.strip()
+            or _extract_population_phrase(src_combined)
+            or ", ".join(sorted(src_demo))
+        )
+        return (
+            f"PICO population mismatch: Claim specifies '{clm_desc}' "
+            f"but authorized source population is '{src_desc}'."
+        )
+
+    if clm_line and src_line and not (clm_line & src_line):
+        return (
+            f"PICO population/line-of-therapy mismatch: Claim specifies {', '.join(sorted(clm_line))} "
+            f"but authorized source is {', '.join(sorted(src_line))}."
+        )
+    return None
+
+
+_CANONICAL_TIME_UNITS: dict[str, str] = {
+    "hour": "hours",
+    "hours": "hours",
+    "day": "days",
+    "days": "days",
+    "week": "weeks",
+    "weeks": "weeks",
+    "month": "months",
+    "months": "months",
+    "year": "years",
+    "years": "years",
+}
+
+
+def _extract_time_unit_pairs(text: str) -> list[tuple[str, str]]:
+    pairs: list[tuple[str, str]] = []
+    for num, unit in re.findall(
+        r"(?<![\d.])(\d+(?:\.\d+)?)[-\s]*(hours?|days?|weeks?|months?|years?)\b",
+        text,
+        flags=re.IGNORECASE,
+    ):
+        canon = _CANONICAL_TIME_UNITS[unit.lower()]
+        pair = (num, canon)
+        if pair not in pairs:
+            pairs.append(pair)
+    for unit, num in re.findall(
+        r"\b(hours?|days?|weeks?|months?|years?)\s+(\d+(?:\.\d+)?)(?!\d)",
+        text,
+        flags=re.IGNORECASE,
+    ):
+        canon = _CANONICAL_TIME_UNITS[unit.lower()]
+        pair = (num, canon)
+        if pair not in pairs:
+            pairs.append(pair)
+    return pairs
+
+
+_ROLE_BINDING_STOPWORDS: set[str] = {
+    "the", "and", "for", "with", "from", "that", "this", "were", "was", "had", "has", "have",
+    "showed", "demonstrated", "achieved", "observed", "reported", "patients", "study", "trial",
+    "group", "cohort", "aurenix", "oncovex", "celvanta", "cardiopulse", "pulsenav",
+    "statistically", "significant", "approximately", "about", "across", "among", "after",
+    "before", "during", "following", "rate", "rates", "score", "scores",
+}
+
+
+def _extract_clause_concept_number_bindings(text: str) -> list[tuple[set[str], set[str]]]:
+    """
+    Splits a sentence into clauses (removing parenthetical CI/HR/p-value blocks) and returns
+    `(concept_words, number_tokens)` for each clause containing at least one number.
+    """
+    cleaned = re.sub(r"\([^)]*\)", " ", text)
+    raw_clauses = re.split(
+        r"(?:;|\band\b|\bvs\.?\b|\bversus\b|\bcompared\s+(?:with|to)\b|\bwhile\b|\bwhereas\b|,(?!\s*\d))",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+    clauses: list[str] = []
+    for rc in raw_clauses:
+        if len(_NUM_TOKEN_PATTERN.findall(rc)) >= 2:
+            sub = re.split(r"\b(?:with|for|to)\b", rc, flags=re.IGNORECASE)
+            if sum(1 for s in sub if _NUM_TOKEN_PATTERN.search(s)) >= 2:
+                clauses.extend(sub)
+                continue
+        clauses.append(rc)
+
+    bindings: list[tuple[set[str], set[str]]] = []
+    for clause in clauses:
+        nums = set(_NUM_TOKEN_PATTERN.findall(clause))
+        if not nums:
+            continue
+        concepts = {
+            w.lower()
+            for w in re.findall(r"[a-zA-Z][a-zA-Z0-9+-]{2,}", clause)
+            if w.lower() not in _ROLE_BINDING_STOPWORDS
+        }
+        if concepts:
+            bindings.append((concepts, nums))
+    return bindings
+
+
+def _find_number_role_swaps(source_text: str, claim_text: str) -> list[str]:
+    """
+    Detects when numeric values present in the source are swapped across distinct endpoints
+    or clinical roles in the claim (e.g., source: 'response in 60% and toxicity in 20%'
+    vs claim: 'response in 20% and toxicity in 60%').
+    """
+    src_bindings = _extract_clause_concept_number_bindings(source_text)
+    clm_bindings = _extract_clause_concept_number_bindings(claim_text)
+    if len(src_bindings) < 2 or len(clm_bindings) < 2:
+        return []
+
+    src_concept_counts: dict[str, int] = {}
+    for concepts, _ in src_bindings:
+        for c in concepts:
+            src_concept_counts[c] = src_concept_counts.get(c, 0) + 1
+
+    clm_concept_counts: dict[str, int] = {}
+    for concepts, _ in clm_bindings:
+        for c in concepts:
+            clm_concept_counts[c] = clm_concept_counts.get(c, 0) + 1
+
+    all_src_nums = {n for _, s_nums in src_bindings for n in s_nums}
+    mismatched_numbers: list[str] = []
+    for clm_concepts, clm_nums in clm_bindings:
+        unique_clm_concepts = {c for c in clm_concepts if clm_concept_counts.get(c) == 1}
+        for src_concepts, src_nums in src_bindings:
+            unique_src_concepts = {c for c in src_concepts if src_concept_counts.get(c) == 1}
+            shared_unique = unique_clm_concepts & unique_src_concepts
+            if shared_unique and not (clm_nums & src_nums):
+                for n in sorted(clm_nums):
+                    if n in all_src_nums and n not in mismatched_numbers:
+                        mismatched_numbers.append(n)
+    return mismatched_numbers
 
 
 def _canonical_endpoint_family(endpoint_text: str) -> str | None:
@@ -285,10 +559,11 @@ def _extract_pico_dimensions(
     Extracts structured PICO clinical entailment dimensions (`population`, `endpoint`,
     `comparator`, `direction`, `magnitude`, `timeframe`) from a clinical claim or source entry.
     When `prefer_source=False` (evaluating a claim sentence), dimensions explicitly present in
-    `text` take precedence over `source` fallback fields so claim-vs-source PICO drift is never masked.
+    `text` take precedence and absent dimensions return `'unspecified'` rather than fabricating
+    source/default placeholders.
     """
     src = source or {}
-    pop_match = _POPULATION_PATTERN.search(text)
+    text_pop = _extract_population_phrase(text)
     end_match = _ENDPOINT_PATTERN.search(text)
     comp_match = _COMPARATOR_PATTERN.search(text)
     tf_match = _TIMEFRAME_PATTERN.search(text)
@@ -296,10 +571,12 @@ def _extract_pico_dimensions(
 
     if _NEGATION_PATTERN.search(text):
         inferred_direction = "null_or_negated"
-    elif re.search(r"\b(reduced|reduction|lowered|decreased)\b", text, flags=re.IGNORECASE):
+    elif _DETRIMENTAL_DIR_PATTERN.search(text):
+        inferred_direction = "worsened"
+    elif _DOWNWARD_DIR_PATTERN.search(text):
         inferred_direction = "reduced"
     elif re.search(
-        r"\b(improved|improvement|increased|achieved|superior|prolonged|extended|accuracy)\b",
+        r"\b(improved|improves|improvement|increased|increases|increase|achieved|superior|prolonged|extended|accuracy)\b",
         text,
         flags=re.IGNORECASE,
     ):
@@ -313,34 +590,40 @@ def _extract_pico_dimensions(
             for q in src.get("required_qualifiers", [])
             if any(
                 tok in str(q).lower()
-                for tok in ("nsclc", "patient", "adult", "2l+", "egfr", "setting", "cohort")
+                for tok in ("nsclc", "patient", "adult", "children", "pediatric", "2l+", "egfr", "setting", "cohort")
             )
         ),
         "",
     )
 
-    text_pop = pop_match.group(1).strip() if pop_match else ""
     src_pop = str(src.get("population") or "").strip()
-    population = (
-        (src_pop or text_pop or qual_pop or "Authorized study population")
-        if prefer_source
-        else (text_pop or src_pop or qual_pop or "Authorized study population")
-    )
+    if prefer_source:
+        population = src_pop or text_pop or qual_pop or "unspecified"
+    else:
+        if text_pop:
+            population = text_pop
+        elif qual_pop and qual_pop.lower() in text.lower():
+            population = qual_pop
+        elif src_pop and src_pop.lower() in text.lower():
+            population = src_pop
+        else:
+            population = "unspecified"
+
 
     text_end = end_match.group(1).strip() if end_match else ""
     src_end = str(src.get("endpoint") or "").strip()
     endpoint = (
-        (src_end or text_end or "Primary clinical or IFU endpoint")
+        (src_end or text_end or "unspecified")
         if prefer_source
-        else (text_end or src_end or "Primary clinical or IFU endpoint")
+        else (text_end or src_end or "unspecified")
     )
 
     text_comp = comp_match.group(1).strip() if comp_match else ""
     src_comp = str(src.get("comparator") or "").strip()
     comparator = (
-        (src_comp or text_comp or "Protocol control / baseline")
+        (src_comp or text_comp or "unspecified")
         if prefer_source
-        else (text_comp or src_comp or "Protocol control / baseline")
+        else (text_comp or (src_comp if src_comp and src_comp.lower() in text.lower() else "unspecified"))
     )
 
     src_dir = str(src.get("direction") or "").strip()
@@ -364,11 +647,10 @@ def _extract_pico_dimensions(
 
     text_tf = tf_match.group(1).strip() if tf_match else ""
     src_tf = str(src.get("timeframe") or "").strip()
-    timeframe = (
-        (src_tf or text_tf or "Protocol observation period")
-        if prefer_source
-        else (text_tf or src_tf or "Protocol observation period")
-    )
+    if prefer_source:
+        timeframe = src_tf or text_tf or "unspecified"
+    else:
+        timeframe = text_tf or (src_tf if src_tf and src_tf.lower() in text.lower() else "unspecified")
 
     return {
         "population": population,
@@ -419,7 +701,8 @@ def _build_sanitized_telemetry_receipt(
     cached_content_name: str | None,
 ) -> dict[str, Any]:
     """
-    Builds a sanitized model invocation telemetry receipt without leaking API keys or credentials.
+    Builds a sanitized model invocation telemetry receipt without leaking API keys or credentials,
+    explicitly distinguishing live SDK execution from offline deterministic fallback.
     """
     effective_model = getattr(telemetry, "model", None) or router.config.model_deep_reasoning
     transport = getattr(telemetry, "transport_mode", None) or "offline_fallback"
@@ -429,23 +712,33 @@ def _build_sanitized_telemetry_receipt(
         if telemetry is not None and hasattr(telemetry, "cached_content")
         else cached_content_name
     )
+    used_live_sdk = bool(getattr(telemetry, "used_live_sdk", False))
     return {
         "claim_id": claim_id,
         "effective_model": str(effective_model),
         "transport": str(transport),
         "service_tier": str(service_tier),
         "zero_data_retention": bool(getattr(router.config, "zero_data_retention", True)),
+        "zdr_attestation": (
+            "provider_request_configured" if used_live_sdk else "config_asserted_only_offline"
+        ),
+        "verification_mode": (
+            "live_sdk_execution" if used_live_sdk else "offline_deterministic_fallback"
+        ),
         "cached_content": str(resolved_cache) if resolved_cache else None,
-        "used_live_sdk": bool(getattr(telemetry, "used_live_sdk", False)),
+        "used_live_sdk": used_live_sdk,
         "interaction_id": str(getattr(telemetry, "interaction_id", f"int_{claim_id}")),
         "timestamp_iso": datetime.now(timezone.utc).isoformat(),
     }
 
 
+_build_telemetry_receipt = _build_sanitized_telemetry_receipt
+
+
 def locate_and_anchor_evidence(
     *,
     job: JobRecord,
-    source_pack: list[dict[str, Any]] | None = None,
+    source_pack: list[dict[str, Any]] | dict[str, Any] | None = None,
     router: GeminiModelRouter | None = None,
 ) -> list[ClaimAssessment]:
     """
@@ -455,14 +748,35 @@ def locate_and_anchor_evidence(
     coordinate-validated PDF bounding boxes (`gemini-3.8-flash` + PyMuPDF coordinates), and
     records sanitized telemetry receipts in `job.metadata["telemetry_receipts"]`.
     """
-    active_router = router or GeminiModelRouter()
+    if router is not None:
+        _JOB_ACTIVE_ROUTERS[job.job_id] = router
+    active_router = router or _JOB_ACTIVE_ROUTERS.get(job.job_id) or GeminiModelRouter()
     if not job.revisions:
         return []
 
     from backend.document_engine import normalize_pdf_rect_to_box_2d
 
-    active_source_pack = source_pack if source_pack else job.source_pack
-    body = job.revisions[-1].body
+    if isinstance(source_pack, dict):
+        supplied_entries = [dict(item) for item in source_pack.get("entries", []) if isinstance(item, dict)]
+    elif isinstance(source_pack, list):
+        supplied_entries = [dict(item) for item in source_pack if isinstance(item, dict)]
+    else:
+        supplied_entries = None
+
+    if supplied_entries:
+        job.source_pack = SourcePackList(supplied_entries)
+        active_source_pack = job.source_pack
+    elif supplied_entries is not None and len(supplied_entries) == 0:
+        active_source_pack = []
+    else:
+        active_source_pack = (
+            list(job.source_pack.get("entries", []))
+            if isinstance(job.source_pack, dict)
+            else list(job.source_pack)
+        )
+
+    latest_rev = job.revisions[-1]
+    body = latest_rev.body
     paragraphs = [p.strip() for p in body.split("\n") if p.strip()]
     has_isi_block = any("important safety information" in p.lower() or "contraindicated" in p.lower() for p in paragraphs)
     requires_isi = job.sector in (SectorType.PHARMA_APPROVED,)
@@ -501,11 +815,17 @@ def locate_and_anchor_evidence(
             box_2d_coords: list[int] = [0, 0, 0, 0]
 
             for src in active_source_pack:
+                src_text_cand = str(src.get("verbatim_text", "")).strip()
                 src_keywords = [k.lower() for k in src.get("keywords", []) if str(k).strip()]
+                if not src_keywords and src_text_cand:
+                    src_keywords = [
+                        w.lower()
+                        for w in re.findall(r"[a-zA-Z][a-zA-Z0-9+-]{3,}", src_text_cand)
+                        if w.lower() not in _ROLE_BINDING_STOPWORDS
+                    ] + _NUM_TOKEN_PATTERN.findall(src_text_cand)
                 kw_matches = sum(1 for kw in src_keywords if kw in sent_lower)
                 if kw_matches == 0:
                     continue
-                src_text_cand = str(src.get("verbatim_text", "")).strip()
                 exact_sub = (
                     1
                     if src_text_cand
@@ -544,13 +864,19 @@ def locate_and_anchor_evidence(
                     expected_device_version = matched_source.get("device_version")
                     contradicted_terms = [t.lower() for t in matched_source.get("ruled_out_terms", [])]
 
-                    # 1. Check semantic negation / polarity inversion (Probe 1)
+                    # 1. Check semantic negation / polarity inversion (Probe 1) and direction reversal
                     polarity_contradiction = _has_semantic_negation_conflict(src_text, sent)
                     if polarity_contradiction:
                         support_status = SupportClassification.CONTRADICTED
                         diagnosis = (
                             "Contradicts clinical source: Polarity/negation mismatch between authorized source and claim."
                         )
+                    else:
+                        dir_conflict_msg = _has_direction_conflict(src_text, sent)
+                        if dir_conflict_msg:
+                            polarity_contradiction = True
+                            support_status = SupportClassification.CONTRADICTED
+                            diagnosis = dir_conflict_msg
 
                     # 2. Check device version mismatch for MedTech
                     device_mismatch = False
@@ -564,7 +890,7 @@ def locate_and_anchor_evidence(
                                 f"but authorized IFU is {expected_device_version}."
                             )
 
-                    # 3. Check clinical number fidelity on word boundaries (Probes 3 & 4)
+                    # 3. Check clinical number fidelity, cross-unit timeframe conflicts, and number-role swaps
                     number_contradiction = False
                     if not polarity_contradiction and not device_mismatch:
                         sent_pcts = [n for n in numbers_in_sent if n.endswith("%")]
@@ -576,24 +902,28 @@ def locate_and_anchor_evidence(
                         unverified_pcts = [p for p in sent_pcts if p not in src_numbers]
                         unverified_decimals = [d for d in sent_decimals if d not in src_numbers]
 
-                        # Check unit-bound clinical quantities (million, patients, months, mg, weeks, years, days, hours)
+                        # Check cross-unit and same-unit timeframe quantities (hours, days, weeks, months, years)
                         unit_conflict = False
                         unit_mismatches: list[str] = []
-                        for unit in (
-                            "million",
-                            "patients",
-                            "months",
-                            "month",
-                            "mg",
-                            "weeks",
-                            "week",
-                            "years",
-                            "year",
-                            "days",
-                            "day",
-                            "hours",
-                            "hour",
-                        ):
+                        sent_time_pairs = _extract_time_unit_pairs(sent)
+                        src_time_pairs = _extract_time_unit_pairs(
+                            f"{src_text} {matched_source.get('timeframe', '')}"
+                        )
+                        if sent_time_pairs:
+                            for t_num, t_unit in sent_time_pairs:
+                                if (t_num, t_unit) not in src_time_pairs:
+                                    unit_conflict = True
+                                    raw_tf_m = re.search(
+                                        rf"(?<![\d.]){re.escape(t_num)}[-\s]*(?:{t_unit}|{t_unit[:-1]})\b|\b(?:{t_unit}|{t_unit[:-1]})\s+{re.escape(t_num)}(?!\d)",
+                                        sent,
+                                        flags=re.IGNORECASE,
+                                    )
+                                    unit_mismatches.append(
+                                        raw_tf_m.group(0) if raw_tf_m else f"{t_num} {t_unit}"
+                                    )
+
+                        # Check non-time unit-bound clinical quantities (million, patients, mg)
+                        for unit in ("million", "patients", "mg"):
                             sent_unit_nums = re.findall(rf"(?<![\d.])(\d+(?:\.\d+)?)\s+{unit}\b", sent, flags=re.IGNORECASE)
                             src_unit_nums = re.findall(rf"(?<![\d.])(\d+(?:\.\d+)?)\s+{unit}\b", src_text, flags=re.IGNORECASE)
                             if sent_unit_nums and src_unit_nums:
@@ -602,14 +932,9 @@ def locate_and_anchor_evidence(
                                     unit_conflict = True
                                     unit_mismatches.extend(bad_u)
                                     break
-                            sent_pref_nums = re.findall(rf"\b{unit}\s+(\d+(?:\.\d+)?)(?!\d)", sent, flags=re.IGNORECASE)
-                            src_pref_nums = re.findall(rf"\b{unit}\s+(\d+(?:\.\d+)?)(?!\d)", src_text, flags=re.IGNORECASE)
-                            if sent_pref_nums and src_pref_nums:
-                                bad_p = [f"{unit} {n}" for n in sent_pref_nums if n not in src_pref_nums]
-                                if bad_p:
-                                    unit_conflict = True
-                                    unit_mismatches.extend(bad_p)
-                                    break
+
+                        # Check number-to-role / endpoint-value swaps across clauses
+                        swapped_role_nums = _find_number_role_swaps(src_text, sent)
 
                         # Or if locked percentage/decimal is missing and replaced by another of the same kind
                         missing_locked_pct = [p for p in locked_pcts if p not in sent_pcts]
@@ -619,6 +944,7 @@ def locate_and_anchor_evidence(
                             unverified_pcts
                             or unverified_decimals
                             or unit_conflict
+                            or swapped_role_nums
                             or (missing_locked_pct and sent_pcts)
                             or (missing_locked_dec and sent_decimals)
                         ):
@@ -628,15 +954,27 @@ def locate_and_anchor_evidence(
                                     unverified_pcts
                                     + unverified_decimals
                                     + unit_mismatches
+                                    + swapped_role_nums
                                     + (sent_pcts if missing_locked_pct else [])
                                     + (sent_decimals if missing_locked_dec else [])
                                 )
                             ) or list(numbers_in_sent)
                             support_status = SupportClassification.CONTRADICTED
-                            diagnosis = (
-                                f"Contradicts clinical source: Altered or unsupported numeric value "
-                                f"(found {', '.join(numbers_in_sent)} in copy vs. locked {locked_source_numbers})."
-                            )
+                            if swapped_role_nums:
+                                diagnosis = (
+                                    f"Contradicts clinical source: Numeric values swapped across endpoints/roles "
+                                    f"({', '.join(swapped_role_nums)})."
+                                )
+                            elif unit_conflict and unit_mismatches:
+                                diagnosis = (
+                                    f"Contradicts clinical source: Timeframe or unit-bound quantity mismatch "
+                                    f"({', '.join(unit_mismatches)})."
+                                )
+                            else:
+                                diagnosis = (
+                                    f"Contradicts clinical source: Altered or unsupported numeric value "
+                                    f"(found {', '.join(numbers_in_sent)} in copy vs. locked {locked_source_numbers})."
+                                )
 
                     # 4. Check ruled-out / broadened terms
                     if not polarity_contradiction and not device_mismatch and not number_contradiction:
@@ -648,6 +986,18 @@ def locate_and_anchor_evidence(
                                     f"Uses ruled-out phrasing '{bad_term}' that contradicts the authorized source scope."
                                 )
                                 break
+
+                    # 4a. Check PICO population / line-of-therapy conflicts against source
+                    if not polarity_contradiction and not device_mismatch and not number_contradiction:
+                        pop_conflict_msg = _has_population_conflict(
+                            src_text,
+                            sent,
+                            str(matched_source.get("population") or ""),
+                        )
+                        if pop_conflict_msg:
+                            number_contradiction = True
+                            support_status = SupportClassification.CONTRADICTED
+                            diagnosis = pop_conflict_msg
 
                     # 4b. Check PICO comparator & endpoint conflicts against source
                     if not polarity_contradiction and not device_mismatch and not number_contradiction:
@@ -917,6 +1267,9 @@ def locate_and_anchor_evidence(
                     plain_english_diagnosis=diagnosis,
                     anchors=anchors,
                     model_used="gemini-4-argon",
+                    bound_version=job.current_version,
+                    bound_revision_sha256=latest_rev.sha256_hash,
+                    stale=False,
                 )
             )
 
@@ -1110,6 +1463,9 @@ def import_rd_handoff_pack(
             ),
             anchors=[anchor],
             model_used="gemini-4-argon",
+            bound_version=job.current_version,
+            bound_revision_sha256=(job.revisions[-1].sha256_hash if job.revisions else ""),
+            stale=False,
         )
         seeded_claims.append(claim)
         if not any(c.sentence_text == claim.sentence_text for c in job.claims):
@@ -1208,7 +1564,17 @@ def import_rd_handoff_pack(
                 body_text=updated_body,
                 actor=resolved_actor,
                 event_type=ProvenanceEventType.ASSET_DRAFTED,
+                reverify_claims=False,
             )
+            latest_sha = job.revisions[-1].sha256_hash if job.revisions else ""
+            for c in seeded_claims:
+                c.bound_version = job.current_version
+                c.bound_revision_sha256 = latest_sha
+                c.stale = False
+            for c in job.claims:
+                c.bound_version = job.current_version
+                c.bound_revision_sha256 = latest_sha
+                c.stale = False
 
     return {
         "job_id": job.job_id,

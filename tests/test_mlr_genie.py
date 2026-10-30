@@ -1951,5 +1951,425 @@ def test_phase3_adversarial_edge_cases_pico_docx_and_cross_column_pdf(tmp_path) 
     assert wrapped_match["continuation_bbox"]["column"] == "right"
 
 
+def test_phase3_independent_review_probes_and_auth_hardening(tmp_path) -> None:
+    """
+    Phase 3 Independent Review Remediation Regression Suite (`probe.py` & `extra.py`):
+    1. Unseen contradiction probes (`population`, `direction`, `time_unit`, `number_role`)
+       classify as `SupportClassification.CONTRADICTED` and absent PICO fields return `"unspecified"`.
+    2. `extract_pdf_source_pack` populates `required_qualifiers` from clinical qualifier patterns
+       when `passage_rules` is omitted.
+    3. Post-edit claim staleness & automatic re-verification: `apply_accepted_changes` editing
+       `'improved'` -> `'worsened'` increments `current_version` to 2, binds claims to v2 (`stale=False`),
+       and re-evaluates the mutated claim as `CONTRADICTED`.
+    4. Authentication & principal verification (`_require_authenticated_tenant` + HMAC-SHA256 bearer tokens):
+       rejects single-header impersonation (`X-Actor-Id` alone, `X-Tenant-Id` alone), arbitrary
+       `Authorization: nonsense` / `Bearer nonsense`, tampered tokens, and expired tokens with HTTP 401,
+       rejects cross-tenant valid tokens with HTTP 403, and accepts valid signed tokens.
+    5. Telemetry receipts honestly report `verification_mode` and `zdr_attestation`.
+    """
+    from fastapi import HTTPException
+    from fastapi.testclient import TestClient
+    from starlette.requests import Request
+    import backend.main as main_mod
+    from backend.document_engine import (
+        create_born_digital_reference_pdf,
+        extract_pdf_source_pack,
+    )
+    from backend.domain.schemas import (
+        CommentCategory,
+        ReviewComment,
+        SupportClassification,
+        WordingSpanEdit,
+    )
+    from backend.tools.document_tools import (
+        apply_accepted_changes,
+        ingest_working_document,
+        locate_and_anchor_evidence,
+    )
 
+    # 1. Exact unseen contradiction probes from docs/independent_review_phase3_2026_10_29/probe.py
+    def _run_claim_probe(sent: str, src: str):
+        j = JobRecord(
+            job_id="p",
+            tenant_id="t",
+            title="t",
+            sector=SectorType.MEDTECH,
+            document_type="Brief",
+            destination_platform="veeva_promomats",
+            deadline_iso="2026-12-01T00:00:00Z",
+        )
+        ingest_working_document(job=j, body_text=sent, actor="a")
+        claim = locate_and_anchor_evidence(
+            job=j,
+            source_pack=[{"source_id": "S1", "version": "1", "verbatim_text": src}],
+        )[0]
+        return claim
+
+    c_pop = _run_claim_probe(
+        "Aurenix improved overall survival in children.",
+        "Aurenix improved overall survival in adults.",
+    )
+    assert c_pop.support_status == SupportClassification.CONTRADICTED
+    assert c_pop.population == "children"
+    assert c_pop.timeframe == "unspecified"
+
+    c_dir = _run_claim_probe(
+        "Aurenix decreased overall survival by 38%.",
+        "Aurenix increased overall survival by 38%.",
+    )
+    assert c_dir.support_status == SupportClassification.CONTRADICTED
+    assert c_dir.direction in ("reduced", "decreased")
+    assert c_dir.population == "unspecified"
+
+    c_time = _run_claim_probe(
+        "Aurenix improved progression-free survival at 24 months.",
+        "Aurenix improved progression-free survival at 24 weeks.",
+    )
+    assert c_time.support_status == SupportClassification.CONTRADICTED
+    assert "24 months" in c_time.numerical_mismatches
+
+    c_role = _run_claim_probe(
+        "Aurenix showed response in 20% and toxicity in 60% of patients.",
+        "Aurenix showed response in 60% and toxicity in 20% of patients.",
+    )
+    assert c_role.support_status == SupportClassification.CONTRADICTED
+    assert c_role.numerical_mismatches
+    # Greedy population regex fix: must extract "patients", not "20% and toxicity in 60% of patients"
+    assert c_role.population == "patients"
+
+    # Intra-clause "with" connector role swap
+    c_role_with = _run_claim_probe(
+        "Aurenix demonstrated a 20% response rate with a 60% toxicity rate.",
+        "Aurenix demonstrated a 60% response rate with a 20% toxicity rate.",
+    )
+    assert c_role_with.support_status == SupportClassification.CONTRADICTED
+    assert "20%" in c_role_with.numerical_mismatches
+    assert "60%" in c_role_with.numerical_mismatches
+
+    # Standalone subject-position population switch ("Pediatric patients" vs "Adult patients")
+    c_pop_subject = _run_claim_probe(
+        "Pediatric patients treated with Aurenix had improved overall survival.",
+        "Adult patients treated with Aurenix had improved overall survival.",
+    )
+    assert c_pop_subject.population == "Pediatric patients"
+    assert c_pop_subject.support_status == SupportClassification.CONTRADICTED
+
+    # Detrimental verb ("worsened") vs downward risk-reduction verb ("reduced")
+    c_dir_down = _run_claim_probe(
+        "Aurenix worsened disease progression risk by 38%.",
+        "Aurenix reduced disease progression risk by 38%.",
+    )
+    assert c_dir_down.support_status == SupportClassification.CONTRADICTED
+
+    # Unverified timeframe against timeframe-free source
+    c_unverified_tf = _run_claim_probe(
+        "Aurenix improved overall survival in adults at 24 months.",
+        "Aurenix improved overall survival in adults.",
+    )
+    assert c_unverified_tf.support_status == SupportClassification.CONTRADICTED
+    assert "24 months" in c_unverified_tf.numerical_mismatches
+
+    # 2. Automatic required_qualifiers extraction in extract_pdf_source_pack when passage_rules omitted
+    qual_pdf = tmp_path / "auto_qualifiers.pdf"
+    create_born_digital_reference_pdf(
+        qual_pdf,
+        pages_spec=[
+            {
+                "header": "Clinical Efficacy Summary",
+                "left_column": [
+                    "In 2L+ EGFR-mutated NSCLC, Aurenix reduced progression risk by 38% (95% CI, 0.49 to 0.78; p=0.0004) in adults."
+                ],
+                "right_column": [],
+            }
+        ],
+    )
+    auto_pack = extract_pdf_source_pack(qual_pdf)
+    assert len(auto_pack) >= 1
+    assert "2L+ EGFR-mutated NSCLC" in auto_pack[0]["required_qualifiers"]
+    assert "95% CI" in auto_pack[0]["required_qualifiers"]
+
+    # 3. Exact stale / post-edit re-verification probe from probe.py + SourcePackList["entries"] compatibility
+    j_stale = JobRecord(
+        job_id="p_stale",
+        tenant_id="t",
+        title="t",
+        sector=SectorType.MEDTECH,
+        document_type="Brief",
+        destination_platform="veeva_promomats",
+        deadline_iso="2026-12-01T00:00:00Z",
+    )
+    ingest_working_document(job=j_stale, body_text="Aurenix improved overall survival.", actor="a")
+    locate_and_anchor_evidence(
+        job=j_stale,
+        source_pack=[
+            {
+                "source_id": "S1",
+                "version": "1",
+                "verbatim_text": "Aurenix improved overall survival.",
+            }
+        ],
+    )
+    assert len(j_stale.source_pack["entries"]) == 1
+    assert j_stale.current_version == 1
+    assert j_stale.claims[0].bound_version == 1
+    assert j_stale.claims[0].stale is False
+    assert j_stale.claims[0].support_status == SupportClassification.SUPPORTED
+
+    j_stale.comments.append(
+        ReviewComment(
+            comment_id="c1",
+            reviewer_name="r",
+            reviewer_role="Medical",
+            timestamp="2026-10-29T00:00:00Z",
+            anchored_passage="Aurenix improved overall survival.",
+            comment_text="change",
+            category=CommentCategory.FACTUAL_CORRECTION,
+            human_decision="accepted",
+            proposed_spans=[
+                WordingSpanEdit(target_text="improved", replacement_text="worsened")
+            ],
+        )
+    )
+    apply_accepted_changes(job=j_stale, comments=j_stale.comments, human_actor="a")
+    assert j_stale.current_version == 2
+    assert [(c.sentence_text, c.support_status.value) for c in j_stale.claims] == [
+        ("Aurenix worsened overall survival.", "contradicted")
+    ]
+    assert j_stale.claims[0].bound_version == 2
+    assert j_stale.claims[0].bound_revision_sha256 == j_stale.revisions[-1].sha256_hash
+    assert j_stale.claims[0].stale is False
+
+    # Also verify that if source_pack is cleared, a subsequent edit marks existing claims stale=True
+    j_stale.source_pack.clear()
+    ingest_working_document(
+        job=j_stale,
+        body_text="Aurenix worsened overall survival significantly.",
+        actor="a",
+    )
+    assert j_stale.current_version == 3
+    assert j_stale.claims[0].stale is True
+
+    # 3b. execute-file-roundtrip must preserve existing job.source_pack and NOT fabricate a self-supporting source from post-edit v2 text
+    client = TestClient(main_mod.app)
+    rt_job_id = "job_rt_preserve_contradicted_v2"
+    if rt_job_id in main_mod.JOBS_DB:
+        del main_mod.JOBS_DB[rt_job_id]
+    headers_rt = {"X-Tenant-Id": "tenant_rt", "X-Actor-Id": "alice@tenant_rt.com"}
+    intake_rt = client.post(
+        "/jobs/intake",
+        headers=headers_rt,
+        json={
+            "job": JobRecord(
+                job_id=rt_job_id,
+                tenant_id="tenant_rt",
+                title="Roundtrip Source Integrity Check",
+                sector=SectorType.MEDTECH,
+                document_type="Brief",
+                destination_platform="veeva_promomats",
+                deadline_iso="2026-12-01T00:00:00Z",
+            ).model_dump(),
+            "initial_body": "Aurenix improved overall survival in adults.",
+            "actor": "alice@tenant_rt.com",
+            "source_pack": [
+                {
+                    "source_id": "S1",
+                    "version": "1.0",
+                    "verbatim_text": "Aurenix improved overall survival in adults.",
+                }
+            ],
+        },
+    )
+    assert intake_rt.status_code == 200
+    assert intake_rt.json()["job"]["claims"][0]["support_status"] == "supported"
+
+    cmt_rt = client.post(
+        f"/jobs/{rt_job_id}/comments",
+        headers=headers_rt,
+        json=[
+            ReviewComment(
+                comment_id="c_rt_1",
+                reviewer_name="r",
+                reviewer_role="Medical",
+                timestamp="2026-10-29T00:00:00Z",
+                anchored_passage="Aurenix improved overall survival in adults.",
+                comment_text="change",
+                category=CommentCategory.FACTUAL_CORRECTION,
+                human_decision="accepted",
+                proposed_spans=[
+                    WordingSpanEdit(target_text="improved", replacement_text="worsened")
+                ],
+            ).model_dump()
+        ],
+    )
+    assert cmt_rt.status_code == 200
+    assert cmt_rt.json()["job"]["claims"][0]["support_status"] == "contradicted"
+
+    rt_exec = client.post(f"/jobs/{rt_job_id}/execute-file-roundtrip", headers=headers_rt)
+    assert rt_exec.status_code == 200
+    rt_job_out = rt_exec.json()["job"]
+    assert rt_job_out["current_version"] == 2
+    assert rt_job_out["claims"][0]["bound_version"] == 2
+    assert rt_job_out["claims"][0]["support_status"] == "contradicted"
+    assert rt_exec.json()["resubmission_zip"]["evidence_bound_to_current_version"] is True
+
+    # 4. Exact auth probes from probe.py and extra.py + HMAC-SHA256 session token & actor spoofing checks
+    def _make_req(headers):
+        scope = {"type": "http", "headers": headers, "query_string": b""}
+        return Request(scope)
+
+    for bad_headers in [
+        [(b"x-actor-id", b"impersonated-reviewer")],
+        [(b"authorization", b"nonsense")],
+        [(b"authorization", b"Bearer nonsense")],
+        [(b"x-tenant-id", b"victim")],
+    ]:
+        try:
+            main_mod._require_authenticated_tenant(_make_req(bad_headers), "victim")
+            raise AssertionError(f"Expected 401 HTTPException for headers {bad_headers}")
+        except HTTPException as exc:
+            assert exc.status_code == 401
+
+    # Actor spoofing in POST /jobs/intake must be rejected with 403
+    spoof_resp = client.post(
+        "/jobs/intake",
+        headers=headers_rt,
+        json={
+            "job": JobRecord(
+                job_id="job_spoof_actor",
+                tenant_id="tenant_rt",
+                title="Spoof Actor Attempt",
+                sector=SectorType.MEDTECH,
+                document_type="Brief",
+                destination_platform="veeva_promomats",
+                deadline_iso="2026-12-01T00:00:00Z",
+            ).model_dump(),
+            "initial_body": "Aurenix improved overall survival in adults.",
+            "actor": "spoofed_cmo@tenant_rt.com",
+            "source_pack": [],
+        },
+    )
+    assert spoof_resp.status_code == 403
+
+    main_mod.JOBS_DB.save_job(
+        JobRecord(
+            job_id="victim-private",
+            tenant_id="tenant_aurenix",
+            title="Victim Private Job",
+            sector=SectorType.MEDTECH,
+            document_type="Brief",
+            destination_platform="veeva_promomats",
+            deadline_iso="2026-12-01T00:00:00Z",
+        )
+    )
+    main_mod.JOBS_DB.save_job(
+        JobRecord(
+            job_id="victim-other",
+            tenant_id="tenant_other_victim",
+            title="Victim Other Tenant Job",
+            sector=SectorType.MEDTECH,
+            document_type="Brief",
+            destination_platform="veeva_promomats",
+            deadline_iso="2026-12-01T00:00:00Z",
+        )
+    )
+    r_actor_only = client.get(
+        "/jobs/victim-private", headers={"X-Actor-Id": "attacker"}
+    )
+    assert r_actor_only.status_code == 401
+    r_nonsense_auth = client.get(
+        "/jobs/victim-private", headers={"Authorization": "nonsense"}
+    )
+    assert r_nonsense_auth.status_code == 401
+    r_tenant_only = client.get(
+        "/jobs/victim-private", headers={"X-Tenant-Id": "tenant_aurenix"}
+    )
+    assert r_tenant_only.status_code == 401
+
+    # Valid HMAC-SHA256 bearer token succeeds for matching tenant and fails with 403 for cross-tenant or conflicting X-Actor-Id
+    valid_token = main_mod.issue_signed_session_token(
+        tenant_id="tenant_aurenix",
+        actor_id="sarah.chen@aurenix.example",
+        role="MLR Gatekeeper",
+        ttl_seconds=3600,
+    )
+    r_valid_bearer = client.get(
+        "/jobs/victim-private",
+        headers={"Authorization": f"Bearer {valid_token}"},
+    )
+    assert r_valid_bearer.status_code == 200
+
+    r_conflicting_actor_header = client.get(
+        "/jobs/victim-private",
+        headers={
+            "Authorization": f"Bearer {valid_token}",
+            "X-Actor-Id": "mallory@aurenix.example",
+        },
+    )
+    assert r_conflicting_actor_header.status_code == 403
+
+    r_cross_tenant_bearer = client.get(
+        "/jobs/victim-other",
+        headers={"Authorization": f"Bearer {valid_token}"},
+    )
+    assert r_cross_tenant_bearer.status_code == 403
+
+    # Tampered signature and expired token must fail with 401
+    tampered_token = valid_token[:-4] + ("AAAA" if valid_token[-4:] != "AAAA" else "BBBB")
+    r_tampered = client.get(
+        "/jobs/victim-private",
+        headers={"Authorization": f"Bearer {tampered_token}"},
+    )
+    assert r_tampered.status_code == 401
+
+    expired_token = main_mod.issue_signed_session_token(
+        tenant_id="tenant_aurenix",
+        actor_id="sarah.chen@aurenix.example",
+        ttl_seconds=-10,
+    )
+    r_expired = client.get(
+        "/jobs/victim-private",
+        headers={"Authorization": f"Bearer {expired_token}"},
+    )
+    assert r_expired.status_code == 401
+
+    # Runtime secret rotation invalidates tokens signed with old secret
+    import os
+
+    prev_secret = os.environ.get("MLR_GENIE_SESSION_SECRET")
+    try:
+        os.environ["MLR_GENIE_SESSION_SECRET"] = "secret-v1-test"
+        tok_v1 = main_mod.issue_signed_session_token("tenant_aurenix", "sarah.chen@aurenix.example")
+        os.environ["MLR_GENIE_SESSION_SECRET"] = "secret-v2-rotated"
+        r_rotated = client.get(
+            "/jobs/victim-private",
+            headers={"Authorization": f"Bearer {tok_v1}"},
+        )
+        assert r_rotated.status_code == 401
+    finally:
+        if prev_secret is None:
+            os.environ.pop("MLR_GENIE_SESSION_SECRET", None)
+        else:
+            os.environ["MLR_GENIE_SESSION_SECRET"] = prev_secret
+
+    # 5. Telemetry receipt honesty in offline fallback mode
+    receipts = c_pop.model_dump()  # verify receipt stored on job
+    j_receipt_check = JobRecord(
+        job_id="p_receipt",
+        tenant_id="t",
+        title="t",
+        sector=SectorType.MEDTECH,
+        document_type="Brief",
+        destination_platform="veeva_promomats",
+        deadline_iso="2026-12-01T00:00:00Z",
+    )
+    ingest_working_document(job=j_receipt_check, body_text="Aurenix improved overall survival in adults.", actor="a")
+    locate_and_anchor_evidence(
+        job=j_receipt_check,
+        source_pack=[{"source_id": "S1", "version": "1", "verbatim_text": "Aurenix improved overall survival in adults."}],
+    )
+    rec = j_receipt_check.metadata["telemetry_receipts"][0]
+    assert rec["used_live_sdk"] is False
+    assert rec["verification_mode"] == "offline_deterministic_fallback"
+    assert rec["zdr_attestation"] == "config_asserted_only_offline"
+    assert rec is not receipts
 

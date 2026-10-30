@@ -204,6 +204,10 @@ def run_real_file_to_file_mlr_round(output_dir: Path | None = None) -> dict[str,
         human_actor="sarah.chen@aurenix.example",
     )
 
+    # Re-verify claims on post-edit v2 revision and re-render annotated reference PDF
+    claims = locate_and_anchor_evidence(job=job, source_pack=source_pack)
+    annotated_pdf_meta = render_annotated_reference_pdf(ref_pdf, annotated_pdf, claims=claims)
+
     # Step 5: Write clean revised .docx and genuine OpenXML Track Changes redline .docx
     clean_docx_meta = write_clean_revised_docx(
         draft_docx,
@@ -236,6 +240,7 @@ def run_real_file_to_file_mlr_round(output_dir: Path | None = None) -> dict[str,
     return {
         "passed": (
             all(c.support_status == SupportClassification.SUPPORTED for c in claims)
+            and all(c.bound_version == job.current_version and not c.stale for c in claims)
             and all(c.anchors[0].anchor_valid is True for c in claims)
             and annotated_pdf_meta["annotation_count"] == 2
             and redline_docx_meta["tracked_replacements"] == 1

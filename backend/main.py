@@ -143,16 +143,113 @@ def _collect_job_artifacts_metadata(job_id: str) -> dict[str, dict[str, Any]]:
     return artifacts
 
 
+import base64
+import hashlib
+import hmac
+import json
+import os
+import time
+
+def _get_session_token_secret() -> bytes:
+    return (
+        os.environ.get("MLR_GENIE_SESSION_SECRET")
+        or "mlr-genie-hmac-sha256-default-signing-key-v1"
+    ).encode("utf-8")
+
+
+def issue_signed_session_token(
+    tenant_id: str,
+    actor_id: str,
+    role: str = "reviewer",
+    ttl_seconds: int = 3600,
+) -> str:
+    """
+    Issues an HMAC-SHA256 signed session token (`mlr1.<base64url_payload>.<base64url_sig>`)
+    binding a verified tenant_id, actor_id, role, and expiration timestamp.
+    """
+    clean_tenant = (tenant_id or "").strip()
+    clean_actor = (actor_id or "").strip()
+    if not clean_tenant or not clean_actor:
+        raise ValueError("Both tenant_id and actor_id are required to issue a signed session token.")
+    now = int(time.time())
+    payload = {
+        "tenant_id": clean_tenant,
+        "actor_id": clean_actor,
+        "role": (role or "reviewer").strip(),
+        "iat": now,
+        "exp": now + int(ttl_seconds),
+    }
+    raw_json = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    payload_b64 = base64.urlsafe_b64encode(raw_json).decode("ascii").rstrip("=")
+    sig = hmac.new(_get_session_token_secret(), payload_b64.encode("ascii"), hashlib.sha256).digest()
+    sig_b64 = base64.urlsafe_b64encode(sig).decode("ascii").rstrip("=")
+    return f"mlr1.{payload_b64}.{sig_b64}"
+
+
+def verify_signed_session_token(token: str) -> dict[str, Any]:
+    """
+    Verifies an HMAC-SHA256 signed session token and returns its claims dict.
+    Raises HTTPException(status_code=401) if malformed, tampered, or expired.
+    """
+    raw = (token or "").strip()
+    if raw.lower().startswith("bearer "):
+        raw = raw[7:].strip()
+    parts = raw.split(".")
+    if len(parts) != 3 or parts[0] != "mlr1" or not parts[1] or not parts[2]:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid session token format; expected 'Bearer mlr1.<payload>.<signature>'.",
+        )
+    _, payload_b64, sig_b64 = parts
+    expected_sig = hmac.new(
+        _get_session_token_secret(),
+        payload_b64.encode("ascii"),
+        hashlib.sha256,
+    ).digest()
+    expected_sig_b64 = base64.urlsafe_b64encode(expected_sig).decode("ascii").rstrip("=")
+    if not hmac.compare_digest(expected_sig_b64, sig_b64):
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid session token signature.",
+        )
+    try:
+        padded = payload_b64 + "=" * (-len(payload_b64) % 4)
+        claims = json.loads(base64.urlsafe_b64decode(padded.encode("ascii")).decode("utf-8"))
+    except Exception as exc:
+        raise HTTPException(
+            status_code=401,
+            detail="Malformed session token payload.",
+        ) from exc
+
+    if not isinstance(claims, dict):
+        raise HTTPException(status_code=401, detail="Invalid session token claims.")
+
+    exp = claims.get("exp")
+    if not isinstance(exp, (int, float)) or int(exp) < int(time.time()):
+        raise HTTPException(status_code=401, detail="Session token has expired.")
+
+    tenant_id = str(claims.get("tenant_id") or "").strip()
+    actor_id = str(claims.get("actor_id") or "").strip()
+    if not tenant_id or not actor_id:
+        raise HTTPException(status_code=401, detail="Session token missing tenant_id or actor_id.")
+
+    return claims
+
+
 def _require_authenticated_tenant(
     request: Request,
-    *,
     expected_tenant_id: str | None = None,
+    *,
     explicit_actor: str | None = None,
     allow_query_auth: bool = False,
 ) -> tuple[str, str]:
     """
-    Enforces HTTP authentication and tenant ownership across all job routes (Probes 6 & 7).
-    Requires an authentication header (`Authorization`, `X-Tenant-Id`, `X-MLR-Tenant-Id`, or `X-Actor-Id`).
+    Enforces HTTP authentication and tenant ownership across all job routes:
+    1. Never falls back to `expected_tenant_id` or a default actor when credentials are absent.
+    2. If `Authorization` header is present, it MUST be a valid `Bearer <signed_session_token>`
+       verified via HMAC-SHA256 (`verify_signed_session_token`); arbitrary values raise 401.
+    3. Otherwise requires BOTH an explicit tenant header (`X-Tenant-Id` / `X-MLR-Tenant-Id`)
+       AND an explicit actor header (`X-Actor-Id` / `X-MLR-Actor`) to be non-empty.
     """
     auth_header = (request.headers.get("authorization") or "").strip()
     header_tenant = (
@@ -168,29 +265,72 @@ def _require_authenticated_tenant(
         or ""
     ).strip()
 
-    if not auth_header and not header_tenant and not header_actor:
+    if auth_header:
+        if not auth_header.lower().startswith("bearer "):
+            raise HTTPException(
+                status_code=401,
+                detail="Invalid Authorization header: expected 'Bearer <signed_session_token>'.",
+            )
+        raw_token = auth_header[7:].strip()
+        claims = verify_signed_session_token(raw_token)
+        resolved_tenant = str(claims["tenant_id"]).strip()
+        resolved_actor = str(claims["actor_id"]).strip()
+        if header_tenant and header_tenant != resolved_tenant:
+            raise HTTPException(
+                status_code=403,
+                detail="Header X-Tenant-Id conflicts with signed session token tenant.",
+            )
+        if header_actor and header_actor != resolved_actor:
+            raise HTTPException(
+                status_code=403,
+                detail="Header X-Actor-Id conflicts with signed session token actor.",
+            )
+        if explicit_actor and explicit_actor.strip() and explicit_actor.strip() != resolved_actor:
+            raise HTTPException(
+                status_code=403,
+                detail=(
+                    f"Actor identity mismatch: payload actor '{explicit_actor.strip()}' "
+                    f"conflicts with authenticated session actor '{resolved_actor}'."
+                ),
+            )
+        if expected_tenant_id and resolved_tenant != expected_tenant_id:
+            raise HTTPException(
+                status_code=403,
+                detail=(
+                    f"Cross-tenant access denied: caller tenant '{resolved_tenant}' "
+                    f"cannot access tenant '{expected_tenant_id}'."
+                ),
+            )
+        return resolved_tenant, resolved_actor
+
+    if not header_tenant or not header_actor:
         raise HTTPException(
             status_code=401,
-            detail="Authentication required: provide Authorization, X-Tenant-Id, or X-Actor-Id header.",
+            detail=(
+                "Authentication required: provide a valid Bearer session token or both "
+                "X-Tenant-Id and X-Actor-Id headers."
+            ),
         )
 
-    actor = header_actor or (explicit_actor or "").strip()
-    if not actor and auth_header:
-        actor = auth_header
-
-    if expected_tenant_id and header_tenant and header_tenant != expected_tenant_id:
+    if explicit_actor and explicit_actor.strip() and explicit_actor.strip() != header_actor:
         raise HTTPException(
             status_code=403,
-            detail=f"Cross-tenant access denied: caller tenant '{header_tenant}' cannot access tenant '{expected_tenant_id}'.",
+            detail=(
+                f"Actor identity mismatch: payload actor '{explicit_actor.strip()}' "
+                f"conflicts with authenticated header actor '{header_actor}'."
+            ),
         )
 
-    resolved_tenant = header_tenant or (expected_tenant_id or "").strip()
-    if not resolved_tenant:
+    if expected_tenant_id and header_tenant != expected_tenant_id:
         raise HTTPException(
-            status_code=401,
-            detail="Tenant identity required in X-Tenant-Id header.",
+            status_code=403,
+            detail=(
+                f"Cross-tenant access denied: caller tenant '{header_tenant}' "
+                f"cannot access tenant '{expected_tenant_id}'."
+            ),
         )
-    return resolved_tenant, actor or "authenticated-user"
+
+    return header_tenant, header_actor
 
 
 @app.get("/health")
@@ -218,7 +358,7 @@ def create_job_intake(req: IntakeRequest, request: Request) -> dict[str, Any]:
     if not req.actor or not req.actor.strip():
         raise HTTPException(status_code=401, detail="Authenticated actor identity is required.")
 
-    caller_tenant, _ = _require_authenticated_tenant(
+    caller_tenant, resolved_actor = _require_authenticated_tenant(
         request,
         expected_tenant_id=job.tenant_id,
         explicit_actor=req.actor,
@@ -260,7 +400,7 @@ def create_job_intake(req: IntakeRequest, request: Request) -> dict[str, Any]:
             "ingest_working_document",
             job=job,
             body_text=req.initial_body,
-            actor=req.actor,
+            actor=resolved_actor,
             event_type=ProvenanceEventType.ASSET_EDIT_RECORDED,
         )
         genie.invoke_tool(
@@ -342,6 +482,14 @@ def reconcile_job_comments(
                 "placed_comment_Ids": apply_res["placed_comment_Ids"],
                 "unplaced_comment_Ids": apply_res["unplaced_comment_Ids"],
             }
+            if apply_res.get("new_revision") is not None:
+                out_dir = _job_artifact_dir(job_id)
+                ref_pdf = out_dir / "02_reference_source.pdf"
+                annotated_pdf = out_dir / "03_annotated_reference.pdf"
+                if ref_pdf.exists():
+                    job.metadata["last_annotated_pdf"] = render_annotated_reference_pdf(
+                        ref_pdf, annotated_pdf, claims=job.claims
+                    )
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
 
@@ -777,6 +925,14 @@ def execute_file_roundtrip_endpoint(job_id: str, request: Request) -> dict[str, 
                 event_type=ProvenanceEventType.ASSET_EDIT_RECORDED,
             )
 
+    existing_source_entries = list(
+        job.source_pack.get("entries", [])
+        if isinstance(job.source_pack, dict)
+        else job.source_pack
+    )
+
+    apply_accepted_changes(job=job, comments=job.comments, human_actor=actor)
+
     if ref_pdf.exists() and job.metadata.get("uploaded_reference_pdf"):
         pdf_inspection = inspect_pdf_document_and_extract_source_pack(
             ref_pdf,
@@ -784,12 +940,66 @@ def execute_file_roundtrip_endpoint(job_id: str, request: Request) -> dict[str, 
             version=str(job.metadata["uploaded_reference_pdf"].get("version", "1.0")),
         )
         pdf_pack = pdf_inspection["source_pack"]
+    elif existing_source_entries:
+        source_passages: list[str] = []
+        passage_rules: list[dict[str, Any]] = []
+        for entry in existing_source_entries:
+            verbatim = str(entry.get("verbatim_text", "")).strip()
+            if verbatim and verbatim not in source_passages:
+                source_passages.append(verbatim)
+            words = [w.lower() for w in re.findall(r"[a-zA-Z0-9%.+-]+", verbatim) if len(w) >= 4]
+            nums = re.findall(r"(?<![\d.])\d+(?:\.\d+)?%?(?!\d)", verbatim)
+            passage_rules.append(
+                {
+                    "verbatim_text": verbatim,
+                    "search_probe": str(entry.get("search_probe") or verbatim[:55]).strip(),
+                    "keywords": list(entry.get("keywords") or dict.fromkeys(words[:8] + nums[:4])),
+                    "locked_numbers": list(
+                        entry.get("locked_numbers") or [n for n in nums if n.endswith("%") or "." in n]
+                    ),
+                    "required_qualifiers": list(entry.get("required_qualifiers") or []),
+                    "ruled_out_terms": list(entry.get("ruled_out_terms") or []),
+                    "device_version": entry.get("device_version"),
+                }
+            )
+        if not source_passages:
+            source_passages = [
+                "Important Safety Information: Aurenix is contraindicated in patients with severe hepatic impairment."
+            ]
+        pages_spec = []
+        for idx in range(0, len(source_passages), 5):
+            chunk = source_passages[idx : idx + 5]
+            page_no = (idx // 5) + 1
+            pages_spec.append(
+                {
+                    "header": f"Authorized Reference Source Pack — Page {page_no}",
+                    "passages": chunk,
+                }
+            )
+        create_born_digital_reference_pdf(ref_pdf, pages_spec=pages_spec)
+        primary_source_id = str(existing_source_entries[0].get("source_id", "SRC-AURORA-301-PDF"))
+        primary_version = str(existing_source_entries[0].get("version", "2.0"))
+        extracted_pack = extract_pdf_source_pack(
+            ref_pdf,
+            source_id=primary_source_id,
+            version=primary_version,
+            passage_rules=passage_rules,
+        )
+        pdf_pack = []
+        for orig_entry, ext_entry in zip(existing_source_entries, extracted_pack):
+            merged = dict(orig_entry)
+            merged.update(ext_entry)
+            if "source_id" in orig_entry:
+                merged["source_id"] = orig_entry["source_id"]
+            if "version" in orig_entry:
+                merged["version"] = orig_entry["version"]
+            pdf_pack.append(merged)
     else:
         default_passages = [
             "In 2L+ EGFR-mutated NSCLC, Aurenix reduced progression-free survival risk by 38% (HR 0.62; 95% CI, 0.49 to 0.78; p<0.001).",
             "Important Safety Information: Aurenix is contraindicated in patients with severe hepatic impairment.",
         ]
-        passage_rules: list[dict[str, Any]] = [
+        passage_rules = [
             {
                 "verbatim_text": "In 2L+ EGFR-mutated NSCLC, Aurenix reduced progression-free survival risk by 38% (HR 0.62; 95% CI, 0.49 to 0.78; p<0.001).",
                 "search_probe": "reduced progression-free survival risk by 38%",
@@ -798,8 +1008,14 @@ def execute_file_roundtrip_endpoint(job_id: str, request: Request) -> dict[str, 
                 "required_qualifiers": ["2L+ EGFR-mutated NSCLC", "95% CI"],
             }
         ]
-        # Also include sentences from the active working draft so custom/UI jobs get real PyMuPDF coordinates
-        doc_sentences = split_medical_sentences(parsed_docx["body_text"])
+        # Include sentences from both the base working draft and the active post-edit revision for unseeded demo jobs
+        latest_body = job.revisions[-1].body if job.revisions else parsed_docx["body_text"]
+        doc_sentences = list(
+            dict.fromkeys(
+                split_medical_sentences(parsed_docx["body_text"])
+                + split_medical_sentences(latest_body)
+            )
+        )
         for sent in doc_sentences:
             if sent not in default_passages and not sent.lower().startswith("important safety information"):
                 default_passages.append(sent)
@@ -844,7 +1060,6 @@ def execute_file_roundtrip_endpoint(job_id: str, request: Request) -> dict[str, 
     locate_and_anchor_evidence(job=job, source_pack=pdf_pack, router=router)
     annot_meta = render_annotated_reference_pdf(ref_pdf, annotated_pdf, claims=job.claims)
 
-    apply_accepted_changes(job=job, comments=job.comments, human_actor=actor)
     clean_meta = write_clean_revised_docx(draft_docx, clean_docx, accepted_comments=job.comments)
     redline_meta = write_tracked_changes_redline_docx(
         draft_docx,
@@ -875,6 +1090,9 @@ def execute_file_roundtrip_endpoint(job_id: str, request: Request) -> dict[str, 
         "artifacts": artifacts_meta,
         "job": job.model_dump(),
     }
+
+
+_execute_roundtrip_for_job = execute_file_roundtrip_endpoint
 
 
 @app.get("/jobs/{job_id}/artifacts")
