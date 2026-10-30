@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import sqlite3
+import tempfile
 from collections.abc import Iterator, MutableMapping
 from pathlib import Path
 from typing import Any
@@ -40,7 +42,19 @@ class DurableJobStore(MutableMapping[str, JobRecord]):
             self.db_path = Path(db_path).resolve()
 
         self._cache: dict[str, JobRecord] = {}
-        self._init_db()
+        try:
+            self._init_db()
+        except sqlite3.OperationalError:
+            fallback_path = (Path(tempfile.gettempdir()) / self.db_path.name).resolve()
+            if fallback_path == self.db_path:
+                raise
+            logging.getLogger(__name__).warning(
+                "SQLite initialization failed at %s; retrying in temporary storage at %s",
+                self.db_path,
+                fallback_path,
+            )
+            self.db_path = fallback_path
+            self._init_db()
         self._load_all_from_disk()
 
     def _connect(self) -> sqlite3.Connection:

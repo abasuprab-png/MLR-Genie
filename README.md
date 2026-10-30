@@ -1,4 +1,8 @@
-# MLR Genie Prototype — Independent Review Package (`v3.0.0-proto`)
+# MLR Genie Prototype (`v3.4.0`)
+
+See [v3.4.0 hardening notes](docs/v3.4.0-hardening.md) for offline claim coverage,
+signed-session routes, approval-day label diffs, and live SDK model-ID resolution.
+The independent-review material below describes the earlier prototype baseline.
 
 This repository contains the **MLR Genie** prototype workspace (`c:\Users\abasu\Documents\antigravity\resilient-maxwell`), including:
 - **Python Backend & Deterministic Domain/Tool Engine**: `backend/` (`FastAPI`, `Pydantic`, custom ADK-style `MlrGenieAgent` wrapper, `GeminiModelRouter`, and deterministic review/document/adapter tools)

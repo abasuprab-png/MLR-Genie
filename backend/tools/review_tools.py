@@ -419,6 +419,15 @@ def analyze_approval_day_label_delta(
     final_population = final_approved_label.get("population", "")
     final_boxed_warning = final_approved_label.get("boxed_warning")
     unexpected_restriction = final_approved_label.get("unexpected_restriction")
+    section_12_1_moa = str(final_approved_label.get("section_12_1_moa") or "").strip()
+    section_14_clinical_figures = [
+        figure
+        for figure in (final_approved_label.get("section_14_clinical_figures") or [])
+        if figure.get("old_value") != figure.get("new_value")
+    ]
+
+    def _normalized_wording(text: str) -> str:
+        return " ".join(text.split()).casefold()
 
     def _indication_matches_scenario(sc: dict[str, Any]) -> bool:
         sc_ind = str(sc.get("indication", "")).strip()
@@ -436,6 +445,15 @@ def analyze_approval_day_label_delta(
             and _indication_matches_scenario(sc)
             and sc.get("boxed_warning") == final_boxed_warning
             and not unexpected_restriction
+            and (
+                not section_12_1_moa
+                or _normalized_wording(str(sc.get("section_12_1_moa") or ""))
+                == _normalized_wording(section_12_1_moa)
+            )
+            and (
+                not section_14_clinical_figures
+                or sc.get("section_14_clinical_figures") == section_14_clinical_figures
+            )
         ),
         None,
     )
@@ -484,6 +502,19 @@ def analyze_approval_day_label_delta(
             impact_reasons.append(f"New boxed warning '{final_boxed_warning}' must be added to safety block")
         if unexpected_restriction:
             impact_reasons.append(f"Unanticipated regulatory restriction: {unexpected_restriction}")
+        if section_12_1_moa and _normalized_wording(section_12_1_moa) not in _normalized_wording(body):
+            impact_reasons.append(
+                f"Section 12.1 Mechanism of Action update required: '{section_12_1_moa}'"
+            )
+        for figure in section_14_clinical_figures:
+            old_value = figure.get("old_value")
+            old_text = str(old_value).strip() if old_value is not None else ""
+            # Match the supplied value literally, not a substring of another word/number.
+            if old_text and re.search(rf"(?<![\w.]){re.escape(old_text)}(?!\w|\.\d)", body):
+                endpoint = figure.get("endpoint") or "clinical figure"
+                impact_reasons.append(
+                    f"Section 14 update ({endpoint}): replace '{old_text}' with '{figure.get('new_value')}'"
+                )
         if impact_reasons:
             affected_assets.append(
                 {
@@ -520,6 +551,12 @@ def analyze_approval_day_label_delta(
                     f"Final population narrowed to '{final_population}'" if final_population else None,
                     f"New boxed warning: '{final_boxed_warning}'" if final_boxed_warning else None,
                     f"Unanticipated outcome: '{unexpected_restriction}'" if unexpected_restriction else None,
+                    f"Section 12.1 MoA update: '{section_12_1_moa}'" if section_12_1_moa else None,
+                    (
+                        f"Section 14 clinical figure updates ({len(section_14_clinical_figures)} item(s))"
+                        if section_14_clinical_figures
+                        else None
+                    ),
                 ]
                 if r is not None
             ]

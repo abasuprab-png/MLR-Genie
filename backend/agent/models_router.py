@@ -153,6 +153,19 @@ class GeminiModelRouter:
             return True
         return False
 
+    LIVE_SDK_MODEL_MAP: dict[str, str] = {
+        "gemini-4-argon": "gemini-2.5-pro",
+        "gemini-3.8-flash": "gemini-2.5-flash",
+        "gemini-3.5-flash-lite": "gemini-2.5-flash-lite",
+        "gemini-embedding-2": "gemini-embedding-001",
+    }
+
+    def resolve_live_sdk_model_id(self, model_id: str) -> str:
+        """Resolve SDK transport IDs without changing logical roles or mock expectations."""
+        if type(self._client).__module__.startswith("google.genai"):
+            return self.LIVE_SDK_MODEL_MAP.get(model_id, model_id)
+        return model_id
+
     def select_model_for_task(self, task_type: str) -> tuple[str, str]:
         """Returns (model_id, service_tier) for a given MLR Genie workflow task."""
         routing_table: dict[str, tuple[str, str]] = {
@@ -218,7 +231,7 @@ class GeminiModelRouter:
                     "ttl": ttl,
                 }
                 created = self._client.caches.create(
-                    model=model_id,
+                    model=self.resolve_live_sdk_model_id(model_id),
                     config=cache_config,
                 )
                 resolved_name = getattr(created, "name", None) or (
@@ -287,7 +300,7 @@ class GeminiModelRouter:
 
                     try:
                         raw_res = self._client.models.generate_content(
-                            model=model_id,
+                            model=self.resolve_live_sdk_model_id(model_id),
                             contents=prompt,
                             config=gen_config,
                         )
@@ -297,7 +310,7 @@ class GeminiModelRouter:
                         retry_config = dict(gen_config)
                         retry_config.pop("cached_content", None)
                         raw_res = self._client.models.generate_content(
-                            model=model_id,
+                            model=self.resolve_live_sdk_model_id(model_id),
                             contents=prompt,
                             config=retry_config,
                         )
@@ -309,7 +322,7 @@ class GeminiModelRouter:
                         out_text = getattr(raw_res, "output_text", None)
                 else:
                     kwargs: dict[str, Any] = {
-                        "model": model_id,
+                        "model": self.resolve_live_sdk_model_id(model_id),
                         "input": prompt,
                         "system_instruction": system_instruction,
                         "service_tier": service_tier,
@@ -416,7 +429,7 @@ class GeminiModelRouter:
         if self._client is not None:
             try:
                 res = self._client.models.embed_content(
-                    model=model_id,
+                    model=self.resolve_live_sdk_model_id(model_id),
                     contents=text_or_caption,
                     config={
                         "output_dimensionality": dims,

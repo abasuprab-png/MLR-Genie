@@ -6,7 +6,7 @@ from typing import Any
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from backend.agent.mlr_genie_agent import MlrGenieAgent
 from backend.agent.models_router import GeminiModelRouter
@@ -42,6 +42,7 @@ from backend.tools.document_tools import (
 )
 from backend.tools.platform_adapters import CapabilityCheckedPlatformAdapter
 from backend.tools.review_tools import (
+    analyze_approval_day_label_delta,
     import_and_reconcile_comments,
     screen_pharmacovigilance_cv08,
     validate_strategy,
@@ -51,7 +52,7 @@ from evals.pharma_comms_scenario_battery import run_pharma_comms_scenario_batter
 
 app = FastAPI(
     title="MLR Genie — Google Cloud, Gemini & ADK Backend",
-    version="3.3.0",
+    version="3.4.0",
 )
 
 app.add_middleware(
@@ -74,6 +75,7 @@ genie.register_tool("import_rd_handoff_pack", import_rd_handoff_pack)
 genie.register_tool("screen_pharmacovigilance_cv08", screen_pharmacovigilance_cv08)
 genie.register_tool("validate_strategy", validate_strategy)
 genie.register_tool("import_and_reconcile_comments", import_and_reconcile_comments)
+genie.register_tool("analyze_approval_day_label_delta", analyze_approval_day_label_delta)
 
 # Durable SQLite-backed store (survives module reload & process restart — Probe 27)
 JOBS_DB = DurableJobStore()
@@ -119,6 +121,19 @@ class ImportRdHandoffBody(BaseModel):
     actor: str | None = None
     human_confirmed: bool = True
     append_to_working_body: bool = True
+
+
+class IssueTokenRequest(BaseModel):
+    tenant_id: str
+    actor_id: str
+    role: str = "reviewer"
+    ttl_seconds: int = Field(default=3600, gt=0)
+
+
+class ApprovalDayLabelDeltaRequest(BaseModel):
+    prepared_scenarios: list[dict[str, Any]] = Field(default_factory=list)
+    final_approved_label: dict[str, Any]
+    launch_kit_assets: list[dict[str, Any]] = Field(default_factory=list)
 
 
 def _job_artifact_dir(job_id: str) -> Path:
@@ -248,7 +263,8 @@ def _require_authenticated_tenant(
     1. Never falls back to `expected_tenant_id` or a default actor when credentials are absent.
     2. If `Authorization` header is present, it MUST be a valid `Bearer <signed_session_token>`
        verified via HMAC-SHA256 (`verify_signed_session_token`); arbitrary values raise 401.
-    3. Otherwise requires BOTH an explicit tenant header (`X-Tenant-Id` / `X-MLR-Tenant-Id`)
+    3. Strict mode requires a signed Bearer token; legacy identity headers/query auth cannot bypass it.
+    4. Otherwise requires BOTH an explicit tenant header (`X-Tenant-Id` / `X-MLR-Tenant-Id`)
        AND an explicit actor header (`X-Actor-Id` / `X-MLR-Actor`) to be non-empty.
     """
     auth_header = (request.headers.get("authorization") or "").strip()
@@ -266,7 +282,7 @@ def _require_authenticated_tenant(
     ).strip()
 
     if auth_header:
-        if not auth_header.lower().startswith("bearer "):
+        if not auth_header.lower().startswith("bearer ") or not auth_header[7:].strip().startswith("mlr1."):
             raise HTTPException(
                 status_code=401,
                 detail="Invalid Authorization header: expected 'Bearer <signed_session_token>'.",
@@ -303,6 +319,9 @@ def _require_authenticated_tenant(
             )
         return resolved_tenant, resolved_actor
 
+    if os.environ.get("MLR_REQUIRE_SIGNED_BEARER_TOKEN", "").strip().lower() in ("1", "true", "yes"):
+        raise HTTPException(status_code=401, detail="Signed Bearer session token required.")
+
     if not header_tenant or not header_actor:
         raise HTTPException(
             status_code=401,
@@ -331,6 +350,29 @@ def _require_authenticated_tenant(
         )
 
     return header_tenant, header_actor
+
+
+@app.post("/auth/token")
+def issue_session_token_endpoint(body: IssueTokenRequest) -> dict[str, Any]:
+    """Prototype token issuance for caller-supplied identities; not an identity-provider login."""
+    role = body.role.strip() or "reviewer"
+    try:
+        token = issue_signed_session_token(
+            tenant_id=body.tenant_id,
+            actor_id=body.actor_id,
+            role=role,
+            ttl_seconds=body.ttl_seconds,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {
+        "access_token": token,
+        "token_type": "Bearer",
+        "tenant_id": body.tenant_id.strip(),
+        "actor_id": body.actor_id.strip(),
+        "role": role,
+        "expires_in": body.ttl_seconds,
+    }
 
 
 @app.get("/health")
@@ -444,6 +486,42 @@ def get_job(job_id: str, request: Request) -> dict[str, Any]:
     return {
         "job": verified_job.model_dump(),
         "artifacts": _collect_job_artifacts_metadata(job_id),
+    }
+
+
+@app.post("/jobs/{job_id}/diff-label")
+def diff_approval_day_label_endpoint(
+    job_id: str, body: ApprovalDayLabelDeltaRequest, request: Request
+) -> dict[str, Any]:
+    caller_tenant, _ = _require_authenticated_tenant(request)
+    try:
+        job = JOBS_DB.get_for_tenant(job_id, caller_tenant)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Job not found") from exc
+    except CrossTenantAccessError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+
+    assets = body.launch_kit_assets
+    if not assets and job.revisions:
+        assets = [{
+            "asset_id": job.job_id,
+            "title": job.title,
+            "channel": job.channel or job.document_type,
+            "body": job.revisions[-1].body,
+        }]
+    delta = analyze_approval_day_label_delta(
+        prepared_scenarios=body.prepared_scenarios,
+        final_approved_label=body.final_approved_label,
+        launch_kit_assets=assets,
+        router=router,
+    )
+    job.metadata["last_approval_day_label_delta"] = delta
+    JOBS_DB.save_job(job)
+    return {
+        "job_id": job.job_id,
+        "tenant_id": caller_tenant,
+        "label_delta": delta,
+        "job": job.model_dump(),
     }
 
 

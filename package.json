@@ -1,6 +1,6 @@
 {
   "name": "mlr-genie-gcp-adk",
-  "version": "3.0.0",
+  "version": "3.4.0",
   "private": true,
   "type": "module",
   "description": "MLR Genie (Version 3) — Agent-first workspace for Pharma, Biotech & MedTech communications teams on GCP, Google ADK, and Gemini 4.0 / 3.8",

@@ -460,6 +460,25 @@ _ROLE_BINDING_STOPWORDS: set[str] = {
 }
 
 
+def _compute_unverified_claim_tokens(
+    claim_text: str, matched_source: dict[str, Any]
+) -> tuple[float, list[str]]:
+    """Measure unique content-token coverage using only the matched source and its metadata."""
+    excluded = _ROLE_BINDING_STOPWORDS | {"evaluated", "treated", "received", "administered"}
+    claim_tokens = set(re.findall(r"[a-zA-Z]{4,}", claim_text.lower())) - excluded
+    if not claim_tokens:
+        return 1.0, []
+
+    source_parts = [str(matched_source.get("verbatim_text") or "")]
+    for field in ("keywords", "required_qualifiers"):
+        source_parts.extend(str(value) for value in (matched_source.get(field) or []))
+    for field in ("population", "endpoint", "comparator", "direction", "magnitude", "timeframe"):
+        source_parts.append(str(matched_source.get(field) or ""))
+    source_tokens = set(re.findall(r"[a-zA-Z]{4,}", " ".join(source_parts).lower()))
+    unverified = sorted(claim_tokens - source_tokens)
+    return len(claim_tokens & source_tokens) / len(claim_tokens), unverified
+
+
 def _extract_clause_concept_number_bindings(text: str) -> list[tuple[set[str], set[str]]]:
     """
     Splits a sentence into clauses (removing parenthetical CI/HR/p-value blocks) and returns
@@ -1060,6 +1079,14 @@ def locate_and_anchor_evidence(
                         else:
                             support_status = SupportClassification.SUPPORTED
                             diagnosis = "Within Approved Meaning (Ready for MLR Review)."
+                            if active_router._client is None:
+                                coverage, unverified = _compute_unverified_claim_tokens(sent, matched_source)
+                                if coverage < 0.75:
+                                    support_status = SupportClassification.PARTIALLY_SUPPORTED
+                                    diagnosis = (
+                                        "Needs closer review: Claim introduces unverified terms "
+                                        f"({', '.join(unverified)}) not established in the matched source passage."
+                                    )
 
                     bbox = matched_source.get("bbox", {"page": 1, "x0": 72.0, "y0": 140.0, "x1": 540.0, "y1": 195.0})
                     b_page, b_x0, b_y0, b_x1, b_y1, b_pw, b_ph = _resolve_bbox_coords(bbox)
