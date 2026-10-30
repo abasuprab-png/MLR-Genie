@@ -11,6 +11,8 @@ on:
 permissions:
   contents: read
   id-token: write
+  # Publish only the non-secret public IP so DNS can be set while TLS is pending.
+  statuses: write
 
 concurrency:
   group: mlr-genie-gcp-production
@@ -29,7 +31,7 @@ jobs:
       github.ref == 'refs/heads/deploy/production' &&
       (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-24.04
-    timeout-minutes: 120
+    timeout-minutes: 240
 
     services:
       postgres:
@@ -130,6 +132,8 @@ jobs:
           project_id: commsrx-ai
 
       - name: Deploy and verify production
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: python deploy/automation/deploy_gcp.py --config deploy/automation/target.json
 
       # Explicit allowlist: never upload ADC, Terraform plans/state, or raw logs.

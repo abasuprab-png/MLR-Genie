@@ -65,3 +65,45 @@ few minutes. Its final output contains only non-secret deployment identifiers an
 can be shared to confirm readiness. A controlled hostname is still needed for
 the managed HTTPS certificate. The deployment and verification stages run next
 from the deliberately updated release branch.
+
+## Production release and verification
+
+`target.json` selects project `commsrx-ai` (`333570013714`), region `us-central1`,
+and the previously unused hostname `mlr-genie.signalfidelitygroup.com`. DNS for
+that domain is authoritative at Cloudflare. A DNS-only A record must point the
+hostname at the load-balancer IP; writing a record into a non-authoritative Vercel
+zone would not publish it.
+
+The deployment workflow runs only for the designated `deploy/production` branch.
+After the setup is confirmed, advance that branch to the reviewed master commit.
+The workflow checks Python/PostgreSQL, client tests and types, and Terraform before
+requesting short-lived Google credentials. The driver verifies the project ID,
+number, identity, and source commit; it rejects resource deletion/replacement
+plans, uses a private versioned GCS state bucket, and records a sanitized plan
+summary. It builds and pushes an immutable image, provisions the database and
+scoped runtime access, creates absent signing/bootstrap secrets privately, and
+bootstraps the SQL schema through a temporary narrowly scoped import grant.
+It never resets an administrator password or substitutes fake Veeva credentials.
+
+The `mlr-genie/public-ip` GitHub commit status publishes the IP as soon as it is
+allocated, before the workflow waits for Cloudflare DNS and Google-managed TLS.
+If that status channel is unavailable, Cloud Shell can read the same non-secret
+value:
+
+```sh
+gcloud compute addresses describe mlr-genie-https --global \
+  --project=commsrx-ai --format='value(address)'
+```
+
+Deployment waits for the managed certificate and public health/auth checks, runs
+the live TypeScript integration and real-journal evaluations, then verifies the
+same job, all four artifact hashes, and individual reviewer provenance after a
+same-image Cloud Run revision replacement. The workflow retains only five
+explicitly allowlisted sanitized reports; credentials, Terraform state, raw
+plans, and raw command logs are excluded. Missing access, DNS, model availability,
+or failed checks produce a failed stage rather than a deployment-success claim.
+
+Veeva's optional credential mount defaults off. Runtime memory defaults to 2 GiB
+with four concurrent PDF requests per instance. Cloud SQL's production defaults
+remain regional HA, two vCPUs/7.5 GiB RAM, backups/PITR, and deletion protection;
+these billable capacity settings are visible in the deployment plan.
