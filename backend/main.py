@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import re
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field, ValidationError
 
@@ -37,6 +37,11 @@ from backend.domain.integrations import (
     CamsVerificationInput, CamsVerificationResponse, CommsRxRoundtripInput, CommsRxRoundtripResponse,
 )
 from backend.integrations import COMMSRX_ARTIFACTS, MAX_REFERENCE_BYTES, IntegrationService
+from backend.security import (
+    ACCEPTANCE_AUTHORIZATIONS, REVIEWER_ROLES, ConfiguredCORSMiddleware, SecurityConfigurationError,
+    artifact_directory, has_authorized_acceptance, hosted_mode, record_acceptance, signed_bearer_required,
+    signing_secret, validate_security_startup,
+)
 from backend.tools.document_tools import (
     apply_accepted_changes,
     import_rd_handoff_pack,
@@ -55,9 +60,16 @@ from backend.tools.review_tools import (
 from evals.acceptance_suite import run_all_12_acceptance_cases
 from evals.pharma_comms_scenario_battery import run_pharma_comms_scenario_battery
 
+@asynccontextmanager
+async def security_lifespan(app: FastAPI):
+    validate_security_startup()
+    yield
+
+
 app = FastAPI(
     title="MLR Genie — Google Cloud, Gemini & ADK Backend",
     version="3.4.0",
+    lifespan=security_lifespan,
 )
 
 
@@ -65,13 +77,22 @@ app = FastAPI(
 async def model_assessment_error_handler(request: Request, exc: ModelAssessmentError) -> JSONResponse:
     return JSONResponse(status_code=502, content={"detail": str(exc), "assessment_failed": True})
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+@app.exception_handler(SecurityConfigurationError)
+async def security_configuration_error_handler(request: Request, exc: SecurityConfigurationError) -> JSONResponse:
+    return JSONResponse(status_code=503, content={"detail": str(exc)})
+
+
+@app.middleware("http")
+async def hosted_route_authentication(request: Request, call_next):
+    try:
+        if hosted_mode() and request.url.path.split("/")[1] in ("jobs", "integrations", "evals"):
+            _require_authenticated_tenant(request)
+    except (HTTPException, SecurityConfigurationError) as exc:
+        return JSONResponse(status_code=getattr(exc, "status_code", 503), content={"detail": getattr(exc, "detail", str(exc))})
+    return await call_next(request)
+
+
+app.add_middleware(ConfiguredCORSMiddleware)
 
 config = GcpAgentConfig()
 router = GeminiModelRouter(config)
@@ -148,8 +169,8 @@ class ApprovalDayLabelDeltaRequest(BaseModel):
 
 
 def _job_artifact_dir(job_id: str) -> Path:
-    safe_job_id = re.sub(r"[^a-zA-Z0-9_.-]", "_", job_id)
-    return Path(__file__).resolve().parent.parent / "artifacts" / "file_roundtrip" / safe_job_id
+    root = Path(__file__).resolve().parent.parent / "artifacts" / "file_roundtrip"
+    return artifact_directory(root, job_id)
 
 
 def _collect_job_artifacts_metadata(job_id: str) -> dict[str, dict[str, Any]]:
@@ -177,10 +198,7 @@ import os
 import time
 
 def _get_session_token_secret() -> bytes:
-    return (
-        os.environ.get("MLR_GENIE_SESSION_SECRET")
-        or "mlr-genie-hmac-sha256-default-signing-key-v1"
-    ).encode("utf-8")
+    return signing_secret()
 
 
 def issue_signed_session_token(
@@ -328,9 +346,10 @@ def _require_authenticated_tenant(
                     f"cannot access tenant '{expected_tenant_id}'."
                 ),
             )
+        request.state.authenticated_principal = claims
         return resolved_tenant, resolved_actor
 
-    if os.environ.get("MLR_REQUIRE_SIGNED_BEARER_TOKEN", "").strip().lower() in ("1", "true", "yes"):
+    if signed_bearer_required():
         raise HTTPException(status_code=401, detail="Signed Bearer session token required.")
 
     if not header_tenant or not header_actor:
@@ -360,13 +379,48 @@ def _require_authenticated_tenant(
             ),
         )
 
+    request.state.authenticated_principal = {"tenant_id": header_tenant, "actor_id": header_actor, "role": "local"}
     return header_tenant, header_actor
+
+
+def _require_reviewer_acceptance(request: Request) -> tuple[str, str]:
+    principal = request.state.authenticated_principal
+    role = str(principal.get("role") or "").strip().lower()
+    local_headers = not request.headers.get("authorization") and not hosted_mode()
+    if role not in REVIEWER_ROLES and not local_headers:
+        raise HTTPException(status_code=403, detail="Accepting edits requires an individual reviewer or approver token.")
+    return str(principal["actor_id"]), role
+
+
+def _authorize_comment_decisions(request: Request, job: JobRecord, comments: list[ReviewComment]) -> None:
+    actor = str(request.state.authenticated_principal["actor_id"])
+    reviewer = _require_reviewer_acceptance(request) if any(c.human_decision == "accepted" for c in comments) else None
+    for comment in comments:
+        comment.human_actor = actor if comment.human_decision in ("accepted", "rejected") else None
+        if comment.human_decision == "accepted":
+            existing = next((old for old in job.comments if old.comment_id == comment.comment_id), None)
+            if hosted_mode() and existing is not None and not has_authorized_acceptance(job, existing):
+                existing.placement_status = "pending"
+                comment.placement_status = "pending"
+            record_acceptance(job, comment, actor=reviewer[0], role=reviewer[1])
+
+
+def _validate_persisted_acceptances(request: Request, job: JobRecord) -> None:
+    role = str(request.state.authenticated_principal.get("role") or "").strip().lower()
+    if not hosted_mode() and role != "service":
+        return  # Preserve the explicit local prototype workflow.
+    if any(c.human_decision == "accepted" and not has_authorized_acceptance(job, c) for c in job.comments):
+        raise HTTPException(status_code=403, detail="Stored accepted edits require a fresh, explicit individual reviewer acceptance.")
 
 
 @app.post("/auth/token")
 def issue_session_token_endpoint(body: IssueTokenRequest, request: Request) -> dict[str, Any]:
     """Issue a token, requiring the configured bootstrap secret on hosted deployments."""
     bootstrap_secret = os.environ.get("MLR_GENIE_BOOTSTRAP_SECRET")
+    if hosted_mode():
+        _get_session_token_secret()
+        if not bootstrap_secret or not bootstrap_secret.strip():
+            raise HTTPException(status_code=503, detail="Hosted token issuance requires MLR_GENIE_BOOTSTRAP_SECRET.")
     if bootstrap_secret:
         supplied_secret = request.headers.get("x-mlr-bootstrap-secret")
         if not supplied_secret:
@@ -436,6 +490,13 @@ def create_job_intake(req: IntakeRequest, request: Request) -> dict[str, Any]:
             status_code=409,
             detail=f"Job '{job.job_id}' already exists; use revision endpoints instead of overwriting intake.",
         )
+
+    # Imported job metadata is caller data, never proof of a human acceptance.
+    job.metadata.pop(ACCEPTANCE_AUTHORIZATIONS, None)
+    job.metadata.pop("comment_resolutions", None)
+    _authorize_comment_decisions(request, job, job.comments)
+    for comment in job.comments:
+        comment.placement_status = "pending"
 
     pv_result = genie.invoke_tool(
         "screen_pharmacovigilance_cv08",
@@ -560,16 +621,16 @@ def reconcile_job_comments(
     except CrossTenantAccessError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
 
+    job = job.model_copy(deep=True)
     try:
-        for comment in comments:
-            if comment.human_decision in ("accepted", "rejected"):
-                comment.human_actor = actor
+        _authorize_comment_decisions(request, job, comments)
         res = genie.invoke_tool(
             "import_and_reconcile_comments",
             job=job,
             raw_comments=comments,
             router=router,
         )
+        _validate_persisted_acceptances(request, job)
         if job.revisions and any(
             c.human_decision == "accepted" and c.placement_status != "placed"
             for c in job.comments
@@ -993,6 +1054,7 @@ def execute_file_roundtrip_endpoint(job_id: str, request: Request) -> dict[str, 
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
     caller_tenant, actor = _require_authenticated_tenant(request, expected_tenant_id=job.tenant_id)
+    _validate_persisted_acceptances(request, job)
     out_dir = _job_artifact_dir(job_id)
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -1220,9 +1282,12 @@ def commsrx_roundtrip_endpoint(
         body = CommsRxRoundtripInput.model_validate_json(payload)
     except ValidationError as exc:
         raise HTTPException(status_code=422, detail=json.loads(exc.json(include_input=False, include_context=False))) from exc
+    if body.accepted_edits or any(c.decision == "accepted" for c in body.comments):
+        _require_reviewer_acceptance(request)
     return IntegrationService(JOBS_DB, router, _job_artifact_dir).commsrx_roundtrip(
         body, reference_pdf.file.read(MAX_REFERENCE_BYTES + 1), tenant, actor,
         execute=lambda job_id: _execute_roundtrip_for_job(job_id, request),
+        authorize_acceptances=lambda job, comments: _authorize_comment_decisions(request, job, comments),
     )
 
 

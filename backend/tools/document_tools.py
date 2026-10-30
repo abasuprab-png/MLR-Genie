@@ -178,7 +178,9 @@ def apply_accepted_changes(
             working_body = candidate_body
             comment.placement_status = "placed"
             comment.provenance = ProvenanceEventType.ASSET_EDIT_RECORDED
-            comment.human_actor = human_actor
+            # Execution may be delegated to a service after the human decision.
+            # Preserve the accepting reviewer; the revision records the executor.
+            comment.human_actor = comment.human_actor or human_actor
             placed_Ids.append(comment.comment_id)
             newly_placed_Ids.append(comment.comment_id)
         else:

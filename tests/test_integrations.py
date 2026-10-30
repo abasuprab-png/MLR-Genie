@@ -104,6 +104,18 @@ def test_cams_textless_pdf_has_no_fabricated_anchor(api):
     assert "page" not in anchor and "boundingBox" not in anchor and "verbatimQuote" not in anchor
 
 
+@pytest.mark.parametrize("claim", ["Important Safety Information: Avoid contact with eyes.",
+                                  "About the Disease & Epidemiology Boilerplate: The study enrolled adults."])
+def test_explicit_cams_claim_is_not_skipped_by_paragraph_filters(api, tmp_path, claim):
+    main, client, headers, _ = api
+    reference = tmp_path / "explicit-claim.pdf"
+    create_born_digital_reference_pdf(reference, pages_spec=[{"passages": [claim]}])
+    response = post(client, headers, reference.read_bytes(), "/integrations/cams/verify-source", {"claimText": claim})
+    assert response.status_code == 200, response.text
+    job = main.JOBS_DB[response.json()["job_id"]]
+    assert len(job.claims) == 1 and job.claims[0].sentence_text == claim
+
+
 @pytest.mark.parametrize("endpoint,payload", [
     ("/integrations/cams/verify-source", {"claimText": CLAIM}),
     ("/integrations/commsrx/roundtrip", roundtrip_payload()),

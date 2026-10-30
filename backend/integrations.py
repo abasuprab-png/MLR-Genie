@@ -161,6 +161,7 @@ class IntegrationService:
     def commsrx_roundtrip(
         self, body: CommsRxRoundtripInput, pdf_bytes: bytes, tenant: str, actor: str,
         execute: Callable[[str], dict],
+        authorize_acceptances: Callable[[JobRecord, list[ReviewComment]], None],
     ) -> CommsRxRoundtripResponse:
         job = self.prepare(tenant=tenant, actor=actor, body=body.body_text, claims=[c.text for c in body.claims],
                            pdf_bytes=pdf_bytes, source=body.source, require_live=body.require_live,
@@ -175,6 +176,7 @@ class IntegrationService:
             human_decision="accepted" if c.comment_id in accepted else c.decision,
             human_actor=actor if c.comment_id in accepted or c.decision != "pending" else None,
         ) for c in body.comments]
+        authorize_acceptances(job, comments)
         reconciliation = import_and_reconcile_comments(job=job, raw_comments=comments, router=self.router)
         self.store.save_job(job)
         if reconciliation["requires_human_resolution"]:

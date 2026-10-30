@@ -12,8 +12,19 @@ Use an already-issued MLR signed session token. Both integration endpoints use
 the existing tenant/actor authentication checks; the client always sends
 `Authorization: Bearer <token>`, including on artifact downloads. Tenant and actor
 are derived from authentication, never from caller-supplied job identity.
-Set `MLR_REQUIRE_SIGNED_BEARER_TOKEN=true` for hosted deployments. Obtain tokens
-through your trusted server; keep `MLR_GENIE_BOOTSTRAP_SECRET` out of browser code.
+Set `MLR_GENIE_ENV=hosted` for every deployment. It requires signed authentication
+regardless of the optional local `MLR_REQUIRE_SIGNED_BEARER_TOKEN` setting. Startup
+rejects a missing/weak/public-default signing secret, and `/auth/token` returns
+503 without bootstrap configuration. Supply a private `MLR_GENIE_SESSION_SECRET`
+of at least 32 UTF-8 bytes and a private `MLR_GENIE_BOOTSTRAP_SECRET` through secret
+storage. Obtain tokens through your trusted server; keep the bootstrap secret out
+of browser code. Terraform uses Secret Manager references and an immutable
+`app_image` digest, with no secret values in Terraform state.
+
+`MLR_GENIE_ALLOWED_ORIGINS` is a comma-separated exact-origin list, empty by default
+in hosted mode; credentials/cookies are disabled. These server integrations need
+no browser CORS allowance. Unset/`local` mode retains prototype behavior and logs
+one startup warning naming relaxed settings.
 
 Both POST endpoints accept multipart form data:
 
@@ -138,6 +149,22 @@ actor owns the acceptance. Supported reviewer roles are Medical, Legal,
 Regulatory, and MLR Operations. `sector` defaults to `corporate`; supply the
 appropriate sector for product-specific review requirements.
 
+For acceptance, use an **individual token** with token role `reviewer` or
+`approver`; the comment's Medical/Legal/Regulatory role does not grant authority.
+CommsRx's trusted server must authenticate the person, then request a token from
+`/auth/token` with that person's stable `actor_id` and the bootstrap header for
+the action. A `service` token may perform CAMS verification and submit pending or
+rejected comments, but either acceptance input form returns 403 before model or
+artifact work. The same rule covers `/jobs/{id}/comments` and nested intake
+comments. No `acceptedBy` field or integration format change is needed.
+
+The job records server-authorized acceptance against the exact edit content.
+That reviewer remains the comment's `human_actor`, redline author, and accepting
+identity in the audit PDF when services later regenerate files. Old acceptances
+without server authorization require explicit individual reacceptance in hosted
+mode. Never infer reviewer authority from a display name, submitted metadata,
+or a caller's assertion that an edit was already placed.
+
 The service preserves the submitted plain text as the original DOCX, uses the
 uploaded reference PDF, reconciles comments, and invokes the existing roundtrip
 pipeline. This surface accepts text plus PDF; it does not import an existing
@@ -169,10 +196,11 @@ It uses `status: 0` for a malformed response or invalid artifact download.
 | HTTP status | Meaning |
 | --- | --- |
 | 400 / 413 | Invalid/empty/encrypted PDF or excessive file size |
-| 401 / 403 | Missing/invalid credentials or cross-tenant access |
+| 401 / 403 | Missing/invalid credentials, cross-tenant access, or acceptance without individual reviewer authority |
 | 409 | CV-08 hold, unresolved reviewer conflict, or an accepted edit could not be placed uniquely |
 | 422 | Invalid payload, claim span, duplicate ID, or unknown claim/comment reference |
 | 502 | Required live assessment unavailable or invalid |
+| 503 | Hosted signing or bootstrap configuration is missing/unsafe |
 
 For 409, `detail.job_id` identifies the persisted review job; conflicts include
 `requires_human_resolution` and conflict groups, and unplaced edits include
@@ -191,16 +219,27 @@ is supported for development, reported as `used_live_sdk: false` and
   omitted coordinates for textless PDFs, authentication, persistence, audit
   content, accepted edits, and four authenticated artifact downloads.
 - TypeScript: `npm test`; `npm run check`; `npm run client:check`.
-- Opt-in live integration: `.venv/bin/python evals/live_integrations.py`. This
+- Opt-in hosted live integration: `.venv/bin/python evals/live_integrations.py --hosted`. This
   compiles the standalone client, runs it with Node against a temporary Uvicorn
   server and database, invokes unmocked Gemini, downloads all four files, verifies
   hashes and document contents, and saves a report in `/tmp/mlr-live-integrations-*`.
+  It uses bootstrap-issued service and individual reviewer tokens. When secrets
+  are not supplied, the isolated test process creates temporary random secrets
+  in memory; it never changes shared deployment configuration or records secrets.
 
-On October 30, 2026, the full suite passed 128 Python tests and 32 TypeScript
+At integration baseline `eb48f68`, the full suite passed 128 Python tests and 32 TypeScript
 tests; both TypeScript checks passed. The compiled-client live smoke test passed
 with seven unmocked Gemini calls, `used_live_sdk: true` throughout, and all four
 artifacts downloaded and verified. See the
 [sanitized integration evidence](../docs/integration-verification-2026-10-30.json).
+
+The subsequent hosted-security verification passed 170 Python tests, 32 TypeScript
+tests, both type checks, and Terraform format/schema validation. The compiled-client
+smoke test passed in hosted mode with seven live calls and bootstrap-issued service
+and reviewer tokens. Job comments, audit PDF, and redline named the individual
+reviewer. See [hosted verification evidence](../docs/hosted-integration-verification-2026-10-30.json).
+This exercised an isolated local server in hosted mode; no production deployment
+or production-secret provisioning was performed.
 
 These contracts and checks prepare the consumer integration. They do not claim
 that CAMS or CommsRx production UI wiring has already been deployed.

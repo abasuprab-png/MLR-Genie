@@ -4,6 +4,10 @@ The [CAMS and CommsRx integration guide](integrations/README.md) documents the
 authenticated source-anchor endpoint, Review Room roundtrip, and standalone
 TypeScript client.
 
+Hosted deployments must set `MLR_GENIE_ENV=hosted` and load signing/bootstrap
+secrets from secret storage. Hosted routes require signed tokens; edit acceptances
+require an individual reviewer token. See the [security and deployment guidance](docs/v3.4.0-hardening.md).
+
 See [v3.4.0 hardening notes](docs/v3.4.0-hardening.md) for offline claim coverage,
 signed-session routes, approval-day label diffs, and live SDK model-ID resolution.
 The independent-review material below describes the earlier prototype baseline.
