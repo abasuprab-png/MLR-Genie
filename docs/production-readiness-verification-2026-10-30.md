@@ -1,5 +1,8 @@
 # Production-readiness implementation and verification — October 30, 2026
 
+Subsequent container and durable-storage implementation is recorded in the
+[deployment follow-up](durable-deployment-verification-2026-10-30.md).
+
 The four changes requested after `b51cba2` are implemented. Production readiness
 remains **blocked on deployment verification**: no public hostname or GCP identity
 was configured in this environment, and production deployment was explicitly a

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import re
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -33,7 +34,11 @@ from backend.domain.schemas import (
     ReviewComment,
     StatementReuseRecord,
 )
-from backend.storage import CrossTenantAccessError, DurableJobStore, JobConflictError
+from backend.storage import (
+    CrossTenantAccessError, DurableJobStore, JobConflictError, StorageUnavailableError, create_job_store,
+)
+from backend.postgres_storage import PostgresJobStore
+from backend.artifact_storage import ArtifactStorageError, ArtifactWorkspaceMiddleware, GcsArtifactStorage
 from backend.domain.integrations import (
     CamsVerificationInput, CamsVerificationResponse, CommsRxRoundtripInput, CommsRxRoundtripResponse,
 )
@@ -67,6 +72,7 @@ async def security_lifespan(app: FastAPI):
     # basicConfig preserves logging already configured by an embedding server.
     logging.basicConfig(level=logging.INFO)
     validate_security_startup()
+    validate_persistence_startup()
     yield
 
 
@@ -86,6 +92,17 @@ async def security_configuration_error_handler(request: Request, exc: SecurityCo
     return JSONResponse(status_code=503, content={"detail": str(exc)})
 
 
+@app.exception_handler(JobConflictError)
+async def persistence_conflict_handler(request: Request, exc: JobConflictError) -> JSONResponse:
+    return JSONResponse(status_code=409, content={"detail": "Job changed during this request; reload it before retrying."})
+
+
+@app.exception_handler(StorageUnavailableError)
+@app.exception_handler(ArtifactStorageError)
+async def persistence_unavailable_handler(request: Request, exc: Exception) -> JSONResponse:
+    return JSONResponse(status_code=503, content={"detail": "Durable storage is unavailable. Retry after it recovers."})
+
+
 @app.middleware("http")
 async def hosted_route_authentication(request: Request, call_next):
     try:
@@ -97,6 +114,7 @@ async def hosted_route_authentication(request: Request, call_next):
 
 
 app.add_middleware(ConfiguredCORSMiddleware)
+app.add_middleware(ArtifactWorkspaceMiddleware)
 
 config = GcpAgentConfig()
 router = GeminiModelRouter(config)
@@ -112,9 +130,24 @@ genie.register_tool("validate_strategy", validate_strategy)
 genie.register_tool("import_and_reconcile_comments", import_and_reconcile_comments)
 genie.register_tool("analyze_approval_day_label_delta", analyze_approval_day_label_delta)
 
-# Durable SQLite-backed store (survives module reload & process restart — Probe 27)
-JOBS_DB = DurableJobStore()
+# Explicit database selection: hosted Cloud Run uses PostgreSQL; SQLite remains a local option.
+JOBS_DB = create_job_store()
+_artifact_backend = os.getenv("MLR_GENIE_ARTIFACT_BACKEND", "local").strip().lower()
+if _artifact_backend not in ("local", "gcs"):
+    raise SecurityConfigurationError("MLR_GENIE_ARTIFACT_BACKEND must be local or gcs.")
+ARTIFACT_STORAGE = None
+if _artifact_backend == "gcs":
+    if not isinstance(JOBS_DB, PostgresJobStore):
+        raise SecurityConfigurationError("GCS artifacts require the PostgreSQL job store.")
+    ARTIFACT_STORAGE = GcsArtifactStorage(os.getenv("MLR_GCS_BUCKET", ""))
+    JOBS_DB.before_save = ARTIFACT_STORAGE.prepare_save
 TENANT_REUSE_LIBRARIES: dict[str, list[StatementReuseRecord]] = {}
+
+
+def validate_persistence_startup() -> None:
+    if os.getenv("MLR_GENIE_REQUIRE_DURABLE_STORAGE", "").strip().lower() in ("true", "1", "yes"):
+        if not isinstance(JOBS_DB, PostgresJobStore) or ARTIFACT_STORAGE is None:
+            raise SecurityConfigurationError("Production requires PostgreSQL jobs and GCS artifacts; local storage is forbidden.")
 
 _APRIMO_DAM_ADAPTER = CapabilityCheckedPlatformAdapter("aprimo_dam")
 
@@ -183,8 +216,26 @@ class ApprovalDayLabelDeltaRequest(BaseModel):
 
 
 def _job_artifact_dir(job_id: str) -> Path:
+    if ARTIFACT_STORAGE is not None:
+        return ARTIFACT_STORAGE.directory(job_id, JOBS_DB)
     root = Path(__file__).resolve().parent.parent / "artifacts" / "file_roundtrip"
     return artifact_directory(root, job_id)
+
+
+def _pin_job_artifacts(job: JobRecord) -> None:
+    """Stage exactly the files belonging to the authorized job snapshot."""
+    if ARTIFACT_STORAGE is not None:
+        ARTIFACT_STORAGE.directory(job.job_id, JOBS_DB, job=job)
+
+
+def _invalidate_generated_artifacts(out_dir: Path, job: JobRecord) -> None:
+    for filename in (
+        "04_revised_clean_v2.docx", "05_tracked_changes_redline_v1_to_v2.docx",
+        "06_resubmission_package.zip", "07_audit_summary.pdf",
+    ):
+        (out_dir / filename).unlink(missing_ok=True)
+    job.metadata.pop("last_roundtrip_artifacts", None)
+    job.metadata.pop("commsrx_roundtrip", None)
 
 
 def _collect_job_artifacts_metadata(job_id: str) -> dict[str, dict[str, Any]]:
@@ -208,7 +259,6 @@ import base64
 import hashlib
 import hmac
 import json
-import os
 import time
 
 def _get_session_token_secret() -> bytes:
@@ -578,6 +628,7 @@ def get_job(job_id: str, request: Request) -> dict[str, Any]:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     if not verified_job:
         raise HTTPException(status_code=404, detail="Job not found")
+    _pin_job_artifacts(verified_job)
     return {
         "job": verified_job.model_dump(),
         "artifacts": _collect_job_artifacts_metadata(job_id),
@@ -638,6 +689,7 @@ def reconcile_job_comments(
         raise HTTPException(status_code=403, detail=str(exc)) from exc
 
     job = job.model_copy(deep=True)
+    _pin_job_artifacts(job)
     try:
         _authorize_comment_decisions(request, job, comments)
         res = genie.invoke_tool(
@@ -662,6 +714,7 @@ def reconcile_job_comments(
             }
             if apply_res.get("new_revision") is not None:
                 out_dir = _job_artifact_dir(job_id)
+                _invalidate_generated_artifacts(out_dir, job)
                 ref_pdf = out_dir / "02_reference_source.pdf"
                 annotated_pdf = out_dir / "03_annotated_reference.pdf"
                 if ref_pdf.exists():
@@ -719,7 +772,10 @@ def import_rd_handoff_endpoint(
     trial_design_summary = body.trial_design_summary if body is not None else None
     human_confirmed = body.human_confirmed if body is not None else True
     append_body = body.append_to_working_body if body is not None else True
-    tenant_lib = TENANT_REUSE_LIBRARIES.setdefault(caller_tenant, [])
+    if isinstance(JOBS_DB, PostgresJobStore):
+        tenant_lib = [record for saved in JOBS_DB.jobs_for_tenant(caller_tenant) for record in saved.reuse_library]
+    else:
+        tenant_lib = TENANT_REUSE_LIBRARIES.setdefault(caller_tenant, [])
 
     try:
         handoff_res = genie.invoke_tool(
@@ -869,20 +925,13 @@ def upload_working_docx_endpoint(
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Invalid .docx file: {exc}") from exc
 
+    _pin_job_artifacts(job)
     out_dir = _job_artifact_dir(job_id)
     out_dir.mkdir(parents=True, exist_ok=True)
     draft_docx = out_dir / "01_working_draft_v1.docx"
     draft_docx.write_bytes(raw_bytes)
 
-    # Invalidate stale downstream roundtrip artifacts (04..06) when a new working draft is uploaded
-    for stale_name in (
-        "04_revised_clean_v2.docx",
-        "05_tracked_changes_redline_v1_to_v2.docx",
-        "06_resubmission_package.zip",
-    ):
-        stale_path = out_dir / stale_name
-        if stale_path.exists():
-            stale_path.unlink()
+    _invalidate_generated_artifacts(out_dir, job)
 
     parsed_docx = parse_docx_working_document(draft_docx)
 
@@ -997,11 +1046,13 @@ def upload_reference_pdf_endpoint(
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Invalid .pdf file: {exc}") from exc
 
+    _pin_job_artifacts(job)
     out_dir = _job_artifact_dir(job_id)
     out_dir.mkdir(parents=True, exist_ok=True)
     ref_pdf = out_dir / "02_reference_source.pdf"
     annotated_pdf = out_dir / "03_annotated_reference.pdf"
     ref_pdf.write_bytes(raw_bytes)
+    _invalidate_generated_artifacts(out_dir, job)
 
     pdf_inspection = inspect_pdf_document_and_extract_source_pack(
         ref_pdf,
@@ -1071,6 +1122,7 @@ def execute_file_roundtrip_endpoint(job_id: str, request: Request) -> dict[str, 
         raise HTTPException(status_code=404, detail="Job not found")
     caller_tenant, actor = _require_authenticated_tenant(request, expected_tenant_id=job.tenant_id)
     _validate_persisted_acceptances(request, job)
+    _pin_job_artifacts(job)
     out_dir = _job_artifact_dir(job_id)
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -1311,7 +1363,7 @@ def commsrx_roundtrip_endpoint(
 def download_commsrx_artifact(job_id: str, artifact_name: str, request: Request) -> FileResponse:
     tenant, _ = _require_authenticated_tenant(request)
     try:
-        JOBS_DB.get_for_tenant(job_id, tenant)
+        job = JOBS_DB.get_for_tenant(job_id, tenant)
     except CrossTenantAccessError as exc:
         raise HTTPException(status_code=403, detail="Cross-tenant artifact access denied.") from exc
     except KeyError as exc:
@@ -1319,6 +1371,7 @@ def download_commsrx_artifact(job_id: str, artifact_name: str, request: Request)
     spec = COMMSRX_ARTIFACTS.get(artifact_name)
     if not spec:
         raise HTTPException(status_code=404, detail="Unknown integration artifact.")
+    _pin_job_artifacts(job)
     path = _job_artifact_dir(job_id) / spec[0]
     if not path.exists():
         raise HTTPException(status_code=404, detail="Integration artifact not generated.")
@@ -1335,6 +1388,7 @@ def list_job_artifacts(job_id: str, request: Request) -> dict[str, Any]:
         job = JOBS_DB.get_for_tenant(job_id, caller_tenant) or job
     except CrossTenantAccessError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
+    _pin_job_artifacts(job)
     return {
         "job_id": job.job_id,
         "tenant_id": caller_tenant,
@@ -1370,10 +1424,11 @@ def download_job_artifact(
         allow_query_auth=True,
     )
     try:
-        _ = JOBS_DB.get_for_tenant(job_id, caller_tenant)
+        job = JOBS_DB.get_for_tenant(job_id, caller_tenant)
     except CrossTenantAccessError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
 
+    _pin_job_artifacts(job)
     file_path = _job_artifact_dir(job_id) / artifact_name
     if not file_path.exists():
         raise HTTPException(

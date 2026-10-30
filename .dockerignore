@@ -1,0 +1,21 @@
+# Allow only runtime source and package metadata into the build context.
+**
+!Dockerfile
+!pyproject.toml
+!README.md
+!backend/
+backend/**
+!backend/*.py
+!backend/agent/
+backend/agent/**
+!backend/agent/*.py
+!backend/domain/
+backend/domain/**
+!backend/domain/*.py
+!backend/tools/
+backend/tools/**
+!backend/tools/*.py
+!evals/
+evals/**
+!evals/acceptance_suite.py
+!evals/pharma_comms_scenario_battery.py

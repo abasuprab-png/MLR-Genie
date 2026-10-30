@@ -12,6 +12,13 @@ callers use the external HTTPS load balancer in the
 [Terraform guide](deploy/terraform/README.md). See the
 [security and deployment guidance](docs/v3.4.0-hardening.md).
 
+Production deployment preparation includes a [runtime container](deploy/container/README.md),
+PostgreSQL jobs with conflict detection, and private GCS artifacts. MLR Genie owns
+that logical database and bucket; CAMS and CommsRx consume its authenticated APIs.
+See [database bootstrap and recovery](deploy/postgres/README.md). Local SQLite
+remains a development option; Cloud Run requires the shared backends. Actual GCP
+deployment and Cloud SQL/GCS access verification are still pending.
+
 See [v3.4.0 hardening notes](docs/v3.4.0-hardening.md) for offline claim coverage,
 signed-session routes, approval-day label diffs, and live SDK model-ID resolution.
 The independent-review material below describes the earlier prototype baseline.
