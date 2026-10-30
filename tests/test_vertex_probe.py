@@ -27,7 +27,7 @@ def fake_factory(payload, *, live=True, calls=None, expected_location="us-centra
             if calls is not None:
                 calls.append(kwargs)
             return payload, SimpleNamespace(
-                model="gemini-3.5-flash-lite", effective_model="gemini-3.5-flash-lite", used_live_sdk=live,
+                model="gemini-4-argon", effective_model="gemini-3.1-pro-preview", used_live_sdk=live,
             )
         return SimpleNamespace(create_interaction=create_interaction)
     return factory
@@ -35,16 +35,23 @@ def fake_factory(payload, *, live=True, calls=None, expected_location="us-centra
 
 def test_probe_uses_only_constant_synthetic_input_and_a_closed_result_schema():
     calls = []
-    result = probe.collect_probe("commsrx-ai", "us-central1", router_factory=fake_factory({"ok": True}, calls=calls))
+    result = probe.collect_probe("commsrx-ai", "us-central1", router_factory=fake_factory({"status": "unresolved"}, calls=calls))
     assert result == {
-        "project_id": "commsrx-ai", "location": "us-central1", "model": "gemini-3.5-flash-lite",
-        "effective_model": "gemini-3.5-flash-lite", "used_live_sdk": True, "status": "passed",
+        "project_id": "commsrx-ai", "location": "us-central1", "model": "gemini-4-argon",
+        "effective_model": "gemini-3.1-pro-preview", "used_live_sdk": True, "status": "passed",
         "provider_http_status": None, "error_message": "",
     }
     assert len(calls) == 1
-    assert calls[0]["task_type"] == "cv08_pv_gate"
+    assert calls[0]["task_type"] == "claim_verification"
     assert calls[0]["prompt"] == probe.PROBE_PROMPT
+    assert json.loads(calls[0]["prompt"]) == {
+        "claim": "This is a public synthetic software connectivity check.",
+        "matched_source": None, "authorized_source_passages": [],
+    }
+    assert calls[0]["system_instruction"] == probe.PROBE_SYSTEM_INSTRUCTION
     assert calls[0]["response_schema"] == probe.PROBE_SCHEMA
+    assert calls[0]["response_schema"] == probe.ClaimVerificationVerdict.model_json_schema()
+    assert "cached_content" not in calls[0]
     assert calls[0]["fallback_payload"] is None
 
 
@@ -68,9 +75,9 @@ def test_provider_error_is_bounded_redacted_and_retains_status():
 
 @pytest.mark.parametrize("payload,live,status", [
     (None, False, "client_unavailable"),
-    ({"ok": True}, False, "client_unavailable"),
-    ({"ok": False}, True, "invalid_response"),
-    ({"ok": True, "unwanted": "not-copied"}, True, "invalid_response"),
+    ({"status": "unresolved"}, False, "client_unavailable"),
+    ({"status": "invalid-verdict"}, True, "invalid_response"),
+    ("not-copied", True, "invalid_response"),
 ])
 def test_fallback_or_wrong_schema_cannot_pass(payload, live, status):
     result = probe.collect_probe("commsrx-ai", "us-central1", router_factory=fake_factory(payload, live=live))
@@ -115,10 +122,19 @@ def test_private_result_upload_has_generation_zero_precondition():
 def test_probe_accepts_explicit_geography_without_changing_configured_location(location):
     probe.validate_target("commsrx-ai", location, "commsrx-ai-mlr-versioned-artifacts", "deployment-probes/test.json")
     result = probe.collect_probe("commsrx-ai", location, router_factory=fake_factory(
-        {"ok": True}, expected_location=location,
+        {"status": "unresolved"}, expected_location=location,
     ))
     assert result["status"] == "passed"
     assert result["location"] == location
+
+
+@pytest.mark.parametrize("verdict", ["supported", "partially_supported", "contradicted", "unresolved"])
+def test_transport_probe_accepts_any_schema_valid_verdict_without_persisting_model_output(verdict):
+    result = probe.collect_probe("commsrx-ai", "us", router_factory=fake_factory(
+        {"status": verdict, "rationale": "public synthetic result must not be copied"}, expected_location="us",
+    ))
+    assert result["status"] == "passed" and result["used_live_sdk"] is True
+    assert "public synthetic result must not be copied" not in json.dumps(result)
 
 
 def set_target(monkeypatch, **changes):
