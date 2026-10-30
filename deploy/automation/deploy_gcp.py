@@ -618,8 +618,12 @@ class Deployment:
             time.sleep(30)
         raise DeploymentError("Public HTTPS readiness deadline expired; check DNS A/proxy settings, certificate status and Cloud Run startup.")
 
-    def vertex_probe(self, workspace: Path) -> None:
+    def vertex_probe(self, workspace: Path, *, case: str = "claim_verification") -> None:
         """Diagnose the live SDK with public synthetic input under the runtime identity."""
+        if case not in {"claim_verification", "journal_intake"}:
+            raise DeploymentError("Only fixed public Vertex probe cases are permitted.")
+        evidence_name = "vertex-probe" if case == "claim_verification" else "journal-intake-probe"
+        report_key = "vertex_probe" if case == "claim_verification" else "journal_intake_probe"
         service = self.cloud_json("run", "services", "describe", "mlr-genie-adk-app",
                                   "--region=" + self.target.region)
         spec = service.get("spec", {}).get("template", {}).get("spec", {})
@@ -647,6 +651,8 @@ class Deployment:
         }
         if location == "global" and self.target.allow_global_inference:
             probe_env["MLR_VERTEX_PROBE_ALLOW_GLOBAL"] = "true"
+        if case == "journal_intake":
+            probe_env["MLR_VERTEX_PROBE_CASE"] = case
         env_file.write_text(json.dumps(probe_env))
         flags = workspace / "vertex-probe-flags.json"
         flags.write_text(json.dumps({
@@ -669,8 +675,8 @@ class Deployment:
             if (not isinstance(result, dict) or set(result) - allowed
                     or result.get("project_id") != self.target.project_id or result.get("location") != location):
                 raise DeploymentError("Vertex probe evidence does not match the serving project and region.")
-            self.write("vertex-probe.json", result)
-            self.report["vertex_probe"] = {"runtime_identity": self.target.runtime_sa,
+            self.write(evidence_name + ".json", result)
+            self.report[report_key] = {"runtime_identity": self.target.runtime_sa,
                                             "image": self.report["image"], **result}
             self.flush()
             if result.get("status") != "passed" or result.get("used_live_sdk") is not True:
@@ -678,7 +684,8 @@ class Deployment:
                 # credentials and bounds the provider diagnostic before upload.
                 raise DeploymentError("Synthetic runtime Vertex probe failed: " +
                                       self.sanitizer.clean(str(result.get("error_message", "No provider diagnostic.")))[:2000])
-            self.report["checks"]["runtime_identity_live_vertex_probe"] = True
+            check = "runtime_identity_live_vertex_probe" if case == "claim_verification" else "runtime_identity_journal_intake_probe"
+            self.report["checks"][check] = True
             self.flush()
         finally:
             failures = []
@@ -847,6 +854,8 @@ class Deployment:
                     self.verify_cloud_run_access()
                 with self.phase("wait for managed certificate and protected public HTTPS endpoint"):
                     self.wait_until_ready()
+                with self.phase("probe the public journal intake assessment under the runtime identity"):
+                    self.vertex_probe(workspace, case="journal_intake")
                 with self.phase("probe live Vertex AI under the application runtime identity"):
                     self.vertex_probe(workspace)
                 bootstrap = self.read_bootstrap_secret()

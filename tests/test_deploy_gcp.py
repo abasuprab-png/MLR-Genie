@@ -870,6 +870,28 @@ def test_probe_cleanup_failure_blocks_success_and_records_owned_job_name(tmp_pat
     assert observed["job"] in current.report["cleanup_required"][0]
 
 
+def test_journal_probe_keeps_the_deep_model_evidence_and_uses_only_the_fixed_case(tmp_path):
+    current, workspace, observed = runtime_probe_deployment(tmp_path)
+    current.vertex_probe(workspace)
+    original = (tmp_path / "evidence/vertex-probe.json").read_text()
+    current.vertex_probe(workspace, case="journal_intake")
+    assert observed["env"]["MLR_VERTEX_PROBE_CASE"] == "journal_intake"
+    assert (tmp_path / "evidence/vertex-probe.json").read_text() == original
+    assert (tmp_path / "evidence/journal-intake-probe.json").exists()
+    assert current.report["checks"]["runtime_identity_journal_intake_probe"] is True
+    assert "vertex_probe" in current.report and "journal_intake_probe" in current.report
+    creates = [args[4] for args, _ in current.runner.calls if args[1:4] == ["run", "jobs", "create"]]
+    deletes = [args[4] for args, _ in current.runner.calls if args[1:4] == ["run", "jobs", "delete"]]
+    assert creates == deletes and len(set(creates)) == 2
+
+
+def test_unknown_probe_case_is_refused_before_cloud_access(tmp_path):
+    current, workspace, _ = runtime_probe_deployment(tmp_path)
+    with pytest.raises(_driver.DeploymentError, match="Only fixed public"):
+        current.vertex_probe(workspace, case="../../private")
+    assert not current.runner.calls
+
+
 @pytest.mark.parametrize("commit,state", [("not-a-sha", "pending"), ("e" * 40, "error")])
 def test_public_ip_status_rejects_invalid_commit_or_state_before_network(tmp_path, monkeypatch, commit, state):
     current = public_ip_deployment(tmp_path, monkeypatch)

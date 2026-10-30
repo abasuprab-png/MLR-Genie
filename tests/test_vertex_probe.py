@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import importlib.util
+import ast
 import json
 from pathlib import Path
 import sys
@@ -27,7 +28,9 @@ def fake_factory(payload, *, live=True, calls=None, expected_location="us-centra
             if calls is not None:
                 calls.append(kwargs)
             return payload, SimpleNamespace(
-                model="gemini-4-argon", effective_model="gemini-3.1-pro-preview", used_live_sdk=live,
+                model="gemini-3.5-flash-lite" if kwargs["task_type"] == "cv08_pv_gate" else "gemini-4-argon",
+                effective_model="gemini-3.5-flash-lite" if kwargs["task_type"] == "cv08_pv_gate" else "gemini-3.1-pro-preview",
+                used_live_sdk=live,
             )
         return SimpleNamespace(create_interaction=create_interaction)
     return factory
@@ -181,3 +184,39 @@ def test_global_probe_rejects_truthy_or_implicit_environment_values(monkeypatch,
     monkeypatch.setenv("MLR_VERTEX_PROBE_ALLOW_GLOBAL", value)
     with pytest.raises(ValueError, match="requires explicit"):
         probe.collect_probe("commsrx-ai", "global", router_factory=lambda *args: pytest.fail("No global call allowed"))
+
+
+def test_journal_intake_probe_matches_the_production_gateway_request_without_reading_documents():
+    from backend.agent.gemini_gateway import GeminiGateway
+    from backend.config import GcpAgentConfig
+
+    source = Path(__file__).resolve().parents[1] / "backend/tools/review_tools.py"
+    function = next(node for node in ast.parse(source.read_text()).body
+                    if isinstance(node, ast.FunctionDef) and node.name == "screen_pharmacovigilance_cv08")
+    call = next(node for node in ast.walk(function) if isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute) and node.func.attr == "assess")
+    instruction = ast.literal_eval(next(key.value for key in call.keywords if key.arg == "instruction"))
+    production_calls = []
+    def production_request(**kwargs):
+        production_calls.append(kwargs)
+        return {"claims": [], "safety_findings": []}, SimpleNamespace(used_live_sdk=True)
+    router = SimpleNamespace(config=GcpAgentConfig(gemini_api_key=None), _client=object(),
+                             create_interaction=production_request)
+    GeminiGateway(router, require_live=True).assess(
+        task_type="cv08_pv_gate", inputs={"submitted_copy": probe.JOURNAL_CLAIM},
+        instruction=instruction, schema=probe.IntakeAssessment,
+        offline=probe.IntakeAssessment(claims=[], safety_findings=[]),
+    )
+    calls = []
+    result = probe.collect_probe("commsrx-ai", "us-central1", "journal_intake", router_factory=fake_factory(
+        {"claims": [], "safety_findings": []}, calls=calls,
+    ))
+    assert calls == production_calls
+    assert result["status"] == "passed" and result["model"] == "gemini-3.5-flash-lite"
+    assert json.loads(calls[0]["prompt"]) == {"submitted_copy": probe.JOURNAL_CLAIM}
+    assert "cached_content" not in calls[0]
+
+
+def test_unknown_probe_case_cannot_select_arbitrary_input_or_call_a_model():
+    with pytest.raises(ValueError, match="Unknown fixed public probe case"):
+        probe.collect_probe("commsrx-ai", "us", "../../private-file", router_factory=lambda *args: pytest.fail("No model call"))
