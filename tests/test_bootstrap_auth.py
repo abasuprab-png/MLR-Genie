@@ -8,6 +8,8 @@ from fastapi.testclient import TestClient
 def token_api(monkeypatch):
     import backend.main as main
 
+    monkeypatch.setenv("MLR_GENIE_ENV", "local")
+    monkeypatch.delenv("K_SERVICE", raising=False)
     monkeypatch.delenv("MLR_GENIE_BOOTSTRAP_SECRET", raising=False)
     with TestClient(main.app) as client:
         yield main, client

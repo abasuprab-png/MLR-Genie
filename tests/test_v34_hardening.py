@@ -121,6 +121,8 @@ def test_live_verdict_is_not_downgraded_by_offline_token_coverage(offline_router
 def api(monkeypatch, tmp_path, offline_router):
     import backend.main as main
 
+    monkeypatch.setenv("MLR_GENIE_ENV", "local")
+    monkeypatch.delenv("K_SERVICE", raising=False)
     monkeypatch.delenv("MLR_REQUIRE_SIGNED_BEARER_TOKEN", raising=False)
     monkeypatch.setenv("MLR_GENIE_SESSION_SECRET", "v34-local-test-signing-secret")
     monkeypatch.setattr(main, "JOBS_DB", DurableJobStore(tmp_path / "api.sqlite3"))
@@ -151,7 +153,7 @@ def test_token_endpoint_signs_normalized_identity_role_and_expiry(api, monkeypat
         "iat": 1_800_000_000, "exp": 1_800_000_120,
     }
     default = client.post("/auth/token", json={"tenant_id": "tenant_v34", "actor_id": "reviewer_v34"}).json()
-    assert default["role"] == "reviewer"
+    assert default["role"] == "requester"
     assert default["expires_in"] == 3600
 
 
@@ -183,7 +185,9 @@ def test_strict_bearer_preserves_signature_expiry_and_tenant_checks(api, monkeyp
     headers = token_headers(client)
     signed = headers["Authorization"]
     tampered = signed[:-1] + ("a" if signed[-1] != "a" else "b")
-    expired = main.issue_signed_session_token("tenant_v34", "reviewer_v34", ttl_seconds=-10)
+    with monkeypatch.context() as clock:
+        clock.setattr(main.time, "time", lambda: 1_000_000_000)
+        expired = main.issue_signed_session_token("tenant_v34", "reviewer_v34", ttl_seconds=1)
     for auth in ["Basic invalid", "Bearer invalid", f"Bearer {signed}", tampered, f"Bearer {expired}"]:
         assert client.get("/jobs/job_v34", headers={"Authorization": auth}).status_code == 401
     assert client.get("/jobs/job_v34", headers=token_headers(client, tenant_id="other_tenant")).status_code == 403

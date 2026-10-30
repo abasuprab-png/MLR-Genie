@@ -4,7 +4,10 @@ from evals.audit_adversarial import run_all_27_adversarial_probes
 from evals.demo_real_file_roundtrip import run_real_file_to_file_mlr_round
 
 
-def test_all_27_adversarial_audit_probes_pass() -> None:
+def test_all_27_adversarial_audit_probes_pass(monkeypatch) -> None:
+    # The historical probes intentionally exercise the local identity-header API.
+    monkeypatch.setenv("MLR_GENIE_ENV", "local")
+    monkeypatch.delenv("K_SERVICE", raising=False)
     results = run_all_27_adversarial_probes()
     assert len(results) == 27
     for probe_key, outcome in results.items():

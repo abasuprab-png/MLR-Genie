@@ -24,12 +24,14 @@ CLAIM = "Signal stability improved by 20% in adults."
 @pytest.fixture
 def api(monkeypatch, tmp_path):
     import backend.main as main
+    monkeypatch.setenv("MLR_GENIE_ENV", "local")
+    monkeypatch.delenv("K_SERVICE", raising=False)
     monkeypatch.setattr(main, "JOBS_DB", DurableJobStore(tmp_path / "integration.sqlite3"))
     monkeypatch.setattr(main, "router", GeminiModelRouter(GcpAgentConfig(gemini_api_key=None, use_vertex_ai=False)))
     monkeypatch.setattr(main, "_job_artifact_dir", lambda job_id: tmp_path / "artifacts" / job_id)
     monkeypatch.delenv("MLR_REQUIRE_LIVE_GEMINI", raising=False)
     monkeypatch.setenv("MLR_REQUIRE_SIGNED_BEARER_TOKEN", "true")
-    headers = {"Authorization": "Bearer " + main.issue_signed_session_token("integration-tenant", "human-reviewer")}
+    headers = {"Authorization": "Bearer " + main.issue_signed_session_token("integration-tenant", "human-reviewer", role="reviewer")}
     pdf = tmp_path / "reference.pdf"
     create_born_digital_reference_pdf(pdf, pages_spec=[
         {"left_column": ["Study design and methodology."], "right_column": ["Randomized trial design."]},

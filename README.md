@@ -4,9 +4,13 @@ The [CAMS and CommsRx integration guide](integrations/README.md) documents the
 authenticated source-anchor endpoint, Review Room roundtrip, and standalone
 TypeScript client.
 
-Hosted deployments must set `MLR_GENIE_ENV=hosted` and load signing/bootstrap
+Hosted deployments set `MLR_GENIE_ENV=hosted` and load signing/bootstrap
 secrets from secret storage. Hosted routes require signed tokens; edit acceptances
-require an individual reviewer token. See the [security and deployment guidance](docs/v3.4.0-hardening.md).
+require an individual reviewer token. Unset mode now defaults to hosted; tokens
+default to `requester` with a maximum hosted lifetime of 3600 seconds. Azure
+callers use the external HTTPS load balancer in the
+[Terraform guide](deploy/terraform/README.md). See the
+[security and deployment guidance](docs/v3.4.0-hardening.md).
 
 See [v3.4.0 hardening notes](docs/v3.4.0-hardening.md) for offline claim coverage,
 signed-session routes, approval-day label diffs, and live SDK model-ID resolution.
@@ -16,7 +20,7 @@ This repository contains the **MLR Genie** prototype workspace (`c:\Users\abasu\
 - **Python Backend & Deterministic Domain/Tool Engine**: `backend/` (`FastAPI`, `Pydantic`, custom ADK-style `MlrGenieAgent` wrapper, `GeminiModelRouter`, and deterministic review/document/adapter tools)
 - **TypeScript Domain Engine & 4-Area React Client**: `src/` and `client/` (`React 18`, `TypeScript`, `Vite`, `Vitest`)
 - **Evaluation & Test Suites**: `evals/acceptance_suite.py` (12 Section 11 cases), `evals/pharma_comms_scenario_battery.py` (15 Pharma/Biotech/MedTech scenarios), `tests/test_mlr_genie.py` (`pytest`), and `src/__tests__/mlrGenie.test.ts` (`vitest`)
-- **Reference Infrastructure-as-Code**: `deploy/terraform/main.tf` (unapplied Terraform template)
+- **Reference Infrastructure-as-Code**: `deploy/terraform/` (unapplied Cloud Run and external HTTPS load balancer templates)
 
 > **Important Scope Notice**: This is a **local prototype with deterministic/in-memory tool implementations and synthetic fixtures**, not a production-deployed system. See [`INDEPENDENT_REVIEW_HANDOFF.md`](./INDEPENDENT_REVIEW_HANDOFF.md) for the complete component-by-component reality check.
 
@@ -83,8 +87,16 @@ pip install "pydantic>=2.7.0" "fastapi>=0.115.0" "uvicorn>=0.30.0" "pytest>=8.2.
 ### Start the Python FastAPI Server (`http://127.0.0.1:8000`)
 ```powershell
 Remove-Item Env:\GEMINI_API_KEY -ErrorAction SilentlyContinue
-python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000
+Remove-Item Env:\MLR_GENIE_ENV -ErrorAction SilentlyContinue
+$env:MLR_GENIE_ALLOW_LOCAL = "true"
+python -m backend.server --host 127.0.0.1 --port 8000
 ```
+The launcher registers its actual bound socket. With mode unset, only this
+loopback bind and `MLR_GENIE_ALLOW_LOCAL=true` enable prototype authentication.
+Public or unknown binds stay hosted and require a private signing secret. Explicit
+`MLR_GENIE_ENV=local` remains a deliberate development option; Cloud Run refuses
+it whenever `K_SERVICE` is set. Startup logs the resolved mode.
+
 - Interactive OpenAPI / Swagger UI: `http://127.0.0.1:8000/docs`
 - Health check: `http://127.0.0.1:8000/health`
 - Run 12 Section 11 acceptance cases via HTTP: `http://127.0.0.1:8000/evals/run-12-cases`

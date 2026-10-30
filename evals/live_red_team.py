@@ -19,6 +19,8 @@ run = Path(os.getenv('MLR_LIVE_REPORT_DIR', tempfile.gettempdir())) / ('run-' + 
 run.mkdir(parents=True)
 os.environ['MLR_REQUIRE_LIVE_GEMINI'] = 'true'
 os.environ['DATABASE_URL'] = 'sqlite:///' + str(run / 'live.sqlite3')
+# This isolated evaluator binds its own loopback socket and uses synthetic data.
+os.environ.setdefault('MLR_GENIE_ENV', 'local')
 if '--bootstrap-probe' in sys.argv:
     os.environ['MLR_GENIE_BOOTSTRAP_SECRET'] = secrets.token_urlsafe(32)
 sys.path.insert(0, str(REPO))

@@ -25,6 +25,13 @@ from evals.acceptance_suite import run_all_12_acceptance_cases
 from evals.pharma_comms_scenario_battery import run_pharma_comms_scenario_battery
 
 
+@pytest.fixture
+def local_prototype_security(monkeypatch):
+    """Legacy HTTP scenarios intentionally exercise the prototype header workflow."""
+    monkeypatch.setenv("MLR_GENIE_ENV", "local")
+    monkeypatch.delenv("K_SERVICE", raising=False)
+
+
 def test_all_12_section_11_acceptance_cases_pass() -> None:
     results = run_all_12_acceptance_cases()
     assert len(results) == 12
@@ -220,6 +227,7 @@ def test_aprimo_dam_vs_productivity_capability_separation_and_cv08_gate() -> Non
     assert job.pv_icrs_flagged is True
 
 
+@pytest.mark.usefixtures("local_prototype_security")
 def test_phase2_full_stack_upload_docx_pdf_roundtrip_and_6_artifact_downloads(tmp_path) -> None:
     """
     Phase 2 verification:
@@ -398,6 +406,7 @@ def test_phase2_full_stack_upload_docx_pdf_roundtrip_and_6_artifact_downloads(tm
     assert sub_resp.json()["job_state"] == "uploaded"
 
 
+@pytest.mark.usefixtures("local_prototype_security")
 def test_phase2_upload_and_download_edge_cases_and_tenant_isolation(tmp_path) -> None:
     """
     Tests edge cases on Phase 2 endpoints:
@@ -505,6 +514,7 @@ def test_phase2_upload_and_download_edge_cases_and_tenant_isolation(tmp_path) ->
     assert pv_up.json()["job"]["state"] == "hold"
 
 
+@pytest.mark.usefixtures("local_prototype_security")
 def test_phase2_table_cell_claims_multi_span_redline_and_reupload_invalidation(tmp_path) -> None:
     """
     Regression test for:
@@ -661,6 +671,7 @@ def test_phase2_table_cell_claims_multi_span_redline_and_reupload_invalidation(t
     assert reup_artifacts["06_resubmission_package.zip"]["exists"] is False
 
 
+@pytest.mark.usefixtures("local_prototype_security")
 def test_phase2_multipage_pdf_anchoring_and_duplicate_quote_disambiguation(tmp_path) -> None:
     """
     Regression test for:
@@ -1095,6 +1106,7 @@ def test_matryoshka_representation_learning_embed_multimodal() -> None:
         assert abs(math.sqrt(sum(v * v for v in fallback_vec)) - 1.0) < 1e-2
 
 
+@pytest.mark.usefixtures("local_prototype_security")
 def test_gemini_context_caching_and_pdf_upload_registration(tmp_path) -> None:
     """
     P2 Red-Team Remediation 5:
@@ -1230,6 +1242,7 @@ def test_gemini_context_caching_and_pdf_upload_registration(tmp_path) -> None:
     assert all(0 <= coord <= 1000 for coord in first_block["box_2d"])
 
 
+@pytest.mark.usefixtures("local_prototype_security")
 def test_all_27_adversarial_probes_pass() -> None:
     """Verifies all 27 adversarial probes (including Probes 25 & 26) pass."""
     from evals.audit_adversarial import run_all_27_adversarial_probes
@@ -1651,6 +1664,7 @@ def test_phase3_two_column_pdf_reading_order_and_scanned_page_ocr_fallback(tmp_p
     assert 2 in not_found_on_scanned["scanned_page_numbers"]
 
 
+@pytest.mark.usefixtures("local_prototype_security")
 def test_phase3_rd_handoff_pack_importer_tool_and_endpoint() -> None:
     """
     Phase 3 Gap 3:
@@ -1951,6 +1965,7 @@ def test_phase3_adversarial_edge_cases_pico_docx_and_cross_column_pdf(tmp_path) 
     assert wrapped_match["continuation_bbox"]["column"] == "right"
 
 
+@pytest.mark.usefixtures("local_prototype_security")
 def test_phase3_independent_review_probes_and_auth_hardening(tmp_path) -> None:
     """
     Phase 3 Independent Review Remediation Regression Suite (`probe.py` & `extra.py`):
@@ -2289,7 +2304,7 @@ def test_phase3_independent_review_probes_and_auth_hardening(tmp_path) -> None:
     valid_token = main_mod.issue_signed_session_token(
         tenant_id="tenant_aurenix",
         actor_id="sarah.chen@aurenix.example",
-        role="MLR Gatekeeper",
+        role="reviewer",
         ttl_seconds=3600,
     )
     r_valid_bearer = client.get(
@@ -2321,11 +2336,13 @@ def test_phase3_independent_review_probes_and_auth_hardening(tmp_path) -> None:
     )
     assert r_tampered.status_code == 401
 
-    expired_token = main_mod.issue_signed_session_token(
-        tenant_id="tenant_aurenix",
-        actor_id="sarah.chen@aurenix.example",
-        ttl_seconds=-10,
-    )
+    from unittest.mock import patch
+    with patch.object(main_mod.time, "time", return_value=1_000_000_000):
+        expired_token = main_mod.issue_signed_session_token(
+            tenant_id="tenant_aurenix",
+            actor_id="sarah.chen@aurenix.example",
+            ttl_seconds=1,
+        )
     r_expired = client.get(
         "/jobs/victim-private",
         headers={"Authorization": f"Bearer {expired_token}"},
