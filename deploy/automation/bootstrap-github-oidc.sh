@@ -115,7 +115,8 @@ PY
 fi
 
 run gcloud services enable iam.googleapis.com iamcredentials.googleapis.com \
-  sts.googleapis.com serviceusage.googleapis.com --project="$PROJECT_ID" --quiet
+  sts.googleapis.com serviceusage.googleapis.com cloudresourcemanager.googleapis.com \
+  --project="$PROJECT_ID" --quiet
 
 sa='{}'; pool='{}'; provider='{}'
 if ! "$dry_run"; then
