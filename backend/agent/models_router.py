@@ -44,6 +44,7 @@ CLINICAL_SAFETY_SETTINGS: list[dict[str, str]] = [
 
 class ModelCallTelemetry(BaseModel):
     model: str
+    effective_model: str | None = None
     task_type: str
     service_tier: str = "standard"
     used_live_sdk: bool = False
@@ -154,9 +155,9 @@ class GeminiModelRouter:
         return False
 
     LIVE_SDK_MODEL_MAP: dict[str, str] = {
-        "gemini-4-argon": "gemini-2.5-pro",
-        "gemini-3.8-flash": "gemini-2.5-flash",
-        "gemini-3.5-flash-lite": "gemini-2.5-flash-lite",
+        "gemini-4-argon": "gemini-3.1-pro-preview",
+        "gemini-3.8-flash": "gemini-3.8-flash",
+        "gemini-3.5-flash-lite": "gemini-3.5-flash-lite",
         "gemini-embedding-2": "gemini-embedding-001",
     }
 
@@ -249,6 +250,7 @@ class GeminiModelRouter:
             "name": cache_name,
             "cache_name": cache_name,
             "model": model_id,
+            "effective_model": self.resolve_live_sdk_model_id(model_id) if self._client is not None else None,
             "ttl": ttl,
             "content_sha256": content_sha256,
             "used_live_sdk": used_live_sdk,
@@ -298,10 +300,17 @@ class GeminiModelRouter:
                     if effective_cached_content:
                         gen_config["cached_content"] = effective_cached_content
 
+                    generation_prompt = prompt
+                    if effective_cached_content and type(self._client).__module__.startswith("google.genai"):
+                        # CachedContent already owns the system instruction. Gemini rejects
+                        # a second one on GenerateContent; put this turn's task in the input.
+                        gen_config.pop("system_instruction", None)
+                        generation_prompt = f"{system_instruction}\n\n{prompt}"
+
                     try:
                         raw_res = self._client.models.generate_content(
                             model=self.resolve_live_sdk_model_id(model_id),
-                            contents=prompt,
+                            contents=generation_prompt,
                             config=gen_config,
                         )
                     except Exception:
@@ -309,6 +318,7 @@ class GeminiModelRouter:
                             raise
                         retry_config = dict(gen_config)
                         retry_config.pop("cached_content", None)
+                        retry_config["system_instruction"] = system_instruction
                         raw_res = self._client.models.generate_content(
                             model=self.resolve_live_sdk_model_id(model_id),
                             contents=prompt,
@@ -357,6 +367,7 @@ class GeminiModelRouter:
 
                 telemetry = ModelCallTelemetry(
                     model=model_id,
+                    effective_model=self.resolve_live_sdk_model_id(model_id),
                     task_type=task_type,
                     service_tier=service_tier,
                     used_live_sdk=True,
@@ -377,6 +388,7 @@ class GeminiModelRouter:
             except Exception as exc:
                 telemetry = ModelCallTelemetry(
                     model=model_id,
+                    effective_model=self.resolve_live_sdk_model_id(model_id),
                     task_type=task_type,
                     service_tier=service_tier,
                     used_live_sdk=False,

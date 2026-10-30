@@ -315,9 +315,9 @@ def sdk_router(request, offline_router):
 
 
 @pytest.mark.parametrize("logical,resolved", [
-    ("gemini-4-argon", "gemini-2.5-pro"),
-    ("gemini-3.8-flash", "gemini-2.5-flash"),
-    ("gemini-3.5-flash-lite", "gemini-2.5-flash-lite"),
+    ("gemini-4-argon", "gemini-3.1-pro-preview"),
+    ("gemini-3.8-flash", "gemini-3.8-flash"),
+    ("gemini-3.5-flash-lite", "gemini-3.5-flash-lite"),
     ("gemini-embedding-2", "gemini-embedding-001"),
     ("custom-model", "custom-model"),
 ])
@@ -344,14 +344,21 @@ def test_sdk_model_resolution_on_both_transports_and_cache_retry(sdk_router, mon
     )
     assert result == {"status": "supported"}
     assert call.call_count == (2 if retry else 1)
-    assert all(c.kwargs["model"] == ("gemini-2.5-pro" if is_sdk else "gemini-4-argon") for c in call.call_args_list)
+    assert all(c.kwargs["model"] == ("gemini-3.1-pro-preview" if is_sdk else "gemini-4-argon") for c in call.call_args_list)
     assert telemetry.model == "gemini-4-argon"
+    assert telemetry.effective_model == ("gemini-3.1-pro-preview" if is_sdk else "gemini-4-argon")
     assert telemetry.used_live_sdk is True
     assert telemetry.transport_mode == transport
     assert telemetry.cached_content == (None if retry else "cachedContents/reference")
+    if is_sdk and transport == "generate_content":
+        first = call.call_args_list[0].kwargs
+        assert "system_instruction" not in first["config"]
+        assert first["contents"] == "Verify evidence\n\nVerify claim"
     if retry:
         last = call.call_args.kwargs
         assert "cached_content" not in (last["config"] if transport == "generate_content" else last)
+        if transport == "generate_content":
+            assert last["config"]["system_instruction"] == "Verify evidence"
 
 
 def test_sdk_cache_and_embedding_resolve_ids_without_changing_logical_metadata(sdk_router, monkeypatch):
@@ -361,8 +368,9 @@ def test_sdk_cache_and_embedding_resolve_ids_without_changing_logical_metadata(s
     monkeypatch.setattr(router._client.caches, "create", create_cache)
     monkeypatch.setattr(router._client.models, "embed_content", embed)
     cache = router.create_reference_context_cache(cache_key="reference", pdf_or_text_content="Source passage")
-    assert create_cache.call_args.kwargs["model"] == ("gemini-2.5-pro" if is_sdk else "gemini-4-argon")
+    assert create_cache.call_args.kwargs["model"] == ("gemini-3.1-pro-preview" if is_sdk else "gemini-4-argon")
     assert cache["model"] == "gemini-4-argon"
+    assert cache["effective_model"] == ("gemini-3.1-pro-preview" if is_sdk else "gemini-4-argon")
     assert router.create_reference_context_cache(cache_key="reference", pdf_or_text_content="Source passage") == cache
     assert create_cache.call_count == 1
     assert router.embed_multimodal("Source passage", dimensions=2) == pytest.approx([0.6, 0.8])

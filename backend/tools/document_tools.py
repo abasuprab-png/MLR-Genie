@@ -723,7 +723,11 @@ def _build_sanitized_telemetry_receipt(
     Builds a sanitized model invocation telemetry receipt without leaking API keys or credentials,
     explicitly distinguishing live SDK execution from offline deterministic fallback.
     """
-    effective_model = getattr(telemetry, "model", None) or router.config.model_deep_reasoning
+    effective_model = (
+        getattr(telemetry, "effective_model", None)
+        or getattr(telemetry, "model", None)
+        or router.config.model_deep_reasoning
+    )
     transport = getattr(telemetry, "transport_mode", None) or "offline_fallback"
     service_tier = getattr(telemetry, "service_tier", None) or "standard"
     resolved_cache = (

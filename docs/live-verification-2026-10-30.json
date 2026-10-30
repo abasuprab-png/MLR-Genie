@@ -1,0 +1,241 @@
+{
+  "baseline_commit": "ec6a082ab5d74260adccd15c223dc2e2c064159e",
+  "run_id": "run-4687cd9a31",
+  "synthetic_data_only": true,
+  "mocked_live_calls": false,
+  "generation_calls": 13,
+  "provider_errors": [],
+  "valid_claim_verdicts": 6,
+  "bootstrap_gate": {
+    "missing_header": 401,
+    "wrong_header": 403,
+    "valid_header": 200,
+    "secret_scope": "isolated verification process"
+  },
+  "call_groups": [
+    {
+      "task": "cv08_pv_gate",
+      "effective_model": "gemini-3.5-flash-lite",
+      "transport": "generate_content",
+      "used_live_sdk": true,
+      "count": 4
+    },
+    {
+      "task": "claim_verification",
+      "effective_model": "gemini-3.1-pro-preview",
+      "transport": "generate_content",
+      "used_live_sdk": true,
+      "count": 6
+    },
+    {
+      "task": "comment_reconciliation",
+      "effective_model": "gemini-3.1-pro-preview",
+      "transport": "generate_content",
+      "used_live_sdk": true,
+      "count": 2
+    },
+    {
+      "task": "approval_day_label_delta",
+      "effective_model": "gemini-3.1-pro-preview",
+      "transport": "generate_content",
+      "used_live_sdk": true,
+      "count": 1
+    }
+  ],
+  "telemetry_receipts": [
+    {
+      "claim_id": "clm_job_live_4687cd9a31_1",
+      "used_live_sdk": true,
+      "effective_model": "gemini-3.1-pro-preview",
+      "transport": "generate_content",
+      "cached_content": "cachedContents/y9fa2e1xgpaechezom52rynvo28zdo43eq5ggpr6"
+    }
+  ],
+  "cache": {
+    "model": "gemini-4-argon",
+    "effective_model": "gemini-3.1-pro-preview",
+    "used_live_sdk": true
+  },
+  "endpoint_statuses": [
+    {
+      "step": "token",
+      "status": 200
+    },
+    {
+      "step": "intake:job_live_4687cd9a31",
+      "status": 200
+    },
+    {
+      "step": "upload-docx",
+      "status": 200
+    },
+    {
+      "step": "upload-pdf",
+      "status": 200
+    },
+    {
+      "step": "conflicting-comments",
+      "status": 200
+    },
+    {
+      "step": "diff-label",
+      "status": 200
+    },
+    {
+      "step": "accept-one-edit",
+      "status": 200
+    },
+    {
+      "step": "roundtrip",
+      "status": 200
+    },
+    {
+      "step": "intake:job_live_4687cd9a31_shift",
+      "status": 200
+    },
+    {
+      "step": "intake:job_live_4687cd9a31_pv",
+      "status": 200
+    }
+  ],
+  "red_team": {
+    "supported_claim": {
+      "classification": "supported",
+      "pdf": {
+        "page_count": 2,
+        "box": [
+          2,
+          54.0,
+          96.0,
+          285.25,
+          137.12
+        ],
+        "inside_page": true,
+        "quote_matches": true
+      }
+    },
+    "population_shift": {
+      "classification": "contradicted",
+      "pdf_backed_verification": {
+        "classification": "contradicted",
+        "receipts": [
+          {
+            "claim_id": "clm_job_live_4687cd9a31_shift_1",
+            "used_live_sdk": true,
+            "effective_model": "gemini-3.1-pro-preview",
+            "transport": "generate_content",
+            "cached_content": "cachedContents/4a4mybz78rjv7tzdxy2ban4rpfq09a4q1av1rxq3"
+          }
+        ],
+        "source_quote": "In adults with EGFR-mutated NSCLC, Aurenix reduced the risk of disease progression or death by 38% compared with placebo."
+      }
+    },
+    "label_diff": {
+      "fits_prepared_scenario": false,
+      "matched_scenario_id": null,
+      "out_of_scenario_reasons": [
+        "Section 12.1 MoA update: 'Aurenix is thought to reduce receptor signaling; the mechanism in humans has not been fully established.'",
+        "Section 14 clinical figure updates (1 item(s))"
+      ],
+      "affected_assets": [
+        {
+          "asset_id": "launch_brief",
+          "title": "launch_brief",
+          "channel": "Press Release",
+          "impact_reasons": [
+            "Section 12.1 Mechanism of Action update required: 'Aurenix is thought to reduce receptor signaling; the mechanism in humans has not been fully established.'",
+            "Section 14 update (disease progression or death): replace '38%' with '35%'"
+          ],
+          "requires_human_reapproval": true
+        }
+      ],
+      "new_review_path_required": true,
+      "model_used": "gemini-4-argon",
+      "service_tier": "priority",
+      "live_semantic_review": false,
+      "model_response": "It appears that the specific text for the **final indication** and the **planned scenario(s)** were left blank or did not paste correctly into your prompt. \n\nTo accurately identify out-of-scenario label changes and determine which launch kit assets will be affected, please provide the following information:\n\n1. **The Final Indication:** (The actual approved label text)\n2. **The Planned Scenario (Scenario 1):** (The assumed indication your team used to build the current launch assets)\n3. **A List of Launch Kit Assets (Optional but recommended):** (e.g., Core Visual Aid, HCP Website, Dosing Guide, Patient Brochure, Objection Handler, etc. If you don't provide this, I can provide a generalized list of commonly affected assets).\n\n**Once you provide that text, I will run an analysis to:**\n* Highlight exactly where the final indication deviates from Scenario 1 (e.g., added restrictions, line-of-therapy changes, biomarker requirements, demographic shifts).\n* Map those specific deviations to your launch kit assets to tell you exactly what needs to be updated (e.g., updating the safety profile, redesigning the dosing calculator, shifting the target audience imagery, etc.). \n\nPlease reply with the missing text, and I will generate the analysis for you!"
+    },
+    "comments": {
+      "requires_human_resolution": true,
+      "after_acceptance": [
+        {
+          "comment_id": "medical",
+          "human_decision": "escalated",
+          "placement_status": "pending"
+        },
+        {
+          "comment_id": "regulatory",
+          "human_decision": "escalated",
+          "placement_status": "pending"
+        }
+      ],
+      "redline": {
+        "has_w_del": false,
+        "has_w_ins": false
+      },
+      "clean_contains_accepted_edit": false,
+      "artifact_files": {
+        "04_revised_clean_v2.docx": {
+          "exists": true,
+          "bytes": 37776
+        },
+        "05_tracked_changes_redline_v1_to_v2.docx": {
+          "exists": true,
+          "bytes": 37776
+        },
+        "03_annotated_reference.pdf": {
+          "exists": true,
+          "bytes": 4214
+        },
+        "06_resubmission_package.zip": {
+          "exists": true,
+          "bytes": 113849
+        }
+      },
+      "annotation_count": 1,
+      "zip": {
+        "corrupt_member": null,
+        "members": [
+          "original/working_draft.docx",
+          "original/clinical_reference_pack.pdf",
+          "revised/clean_revised.docx",
+          "revised/redline_tracked_changes.docx",
+          "references/annotated_reference_pack.pdf",
+          "review/evidence_matrix.json",
+          "review/comment_response_log.json",
+          "review/decisions_and_provenance.json",
+          "manifest.json"
+        ]
+      },
+      "model_response": "Please provide the two comments you would like me to reconcile for job `job_live_4687cd9a31`. \n\nOnce you share them, I will group the feedback by topic, preserve the verbatim wording of each comment, and highlight any conflicting points so you can make the final decision."
+    },
+    "paraphrased_adverse_event": {
+      "screening": {
+        "cv08_flagged": false,
+        "routing_note": null,
+        "model_used": "gemini-3.5-flash-lite"
+      },
+      "state": "draft",
+      "model_response": "Based on the intake text provided, here is the adverse event (AE) screening and triage assessment according to standard pharmacovigilance (ICSR) guidelines:\n\n### **Case Summary (CV-08 Intake)**\n*   **Patient:** Aunt (Adult, exact age/gender not provided)\n*   **Suspect Product:** Aurenix (tablet)\n*   **Event:** Light-headedness / Syncope (\"crumpled to the kitchen floor\") leading to hospitalization.\n\n---\n\n### **ICSR Validity Criteria (The 4 Core Elements)**\nTo determine if this intake constitutes a valid Individual Case Safety Report (ICSR) for regulatory reporting, it is checked against the four minimum criteria:\n\n1.  **Identifiable Reporter:** **No** (The reporter is the patient's niece/nephew; contact details for the reporter are currently missing from the text).\n2.  **Identifiable Patient:** **No** (Described only as \"my aunt\"; initials, age, or date of birth are missing).\n3.  **Suspect Product:** **Yes** (Aurenix tablet).\n4.  **Suspect Adverse Event:** **Yes** (Severe light-headedness / syncopal episode resulting in a fall and hospitalization).\n\n*Verdict:* **Currently an invalid ICSR** due to missing identifiable patient and reporter information. Follow-up is required to gather these details.\n\n---\n\n### **CIOMS / Data Extraction Fields**\n\n*   **Patient Information:**\n    *   Age/DOB: Unknown (Adult female)\n    *   Gender: Female (\"aunt\")\n*   **Event Information:**\n    *   Preferred Term (MedDRA equivalent): Syncope / Dizziness / Presyncope / Fall\n    *   Description: Severe light-headedness immediately following ingestion, leading to a fall (\"crumpled to the kitchen floor\").\n*   **Product Information:**\n    *   Drug Name: Aurenix\n    *   Indication: Unknown\n    *   Dose/Route/Frequency: \"First ... tablet\" (Oral, single dose assumed)\n    *   Therapy Dates: Start date: Same day as event.\n*   **Seriousness Criteria:** \n    *   **Serious:** **Yes**\n    *   *Justification:* Results in **hospitalization** (\"paramedics took her straight to hospital\") and is considered medically significant due to the loss of consciousness/fall.\n*   **Causality (Naranjo / Company Assessment):** \n    *   Temporal relationship is strong (occurred after swallowing the first tablet). Requires review by a drug safety physician.\n\n---\n\n### **Recommended Next Steps (Action Items)**\n\n1.  **Flag as Serious:** Process with expedited priority due to hospitalization.\n2.  **Information Gathering (Follow-up):**\n    *   Contact the reporter to obtain the patient's full name/initials, age, and medical history.\n    *   Obtain the reporter's name and contact information to satisfy regulatory validity.\n    *   Confirm the indication for Aurenix, batch/lot number, and concurrent medications.\n    *   Request hospital discharge summaries or medical records confirming the diagnosis and course of treatment.\n3.  **Regulatory Submission:** Once minimum criteria (identifiable patient + identifiable reporter + suspect product + adverse event) are verified via follow-up, submit the expedited safety report to the relevant health authority (e.g., FDA, EMA) within the mandatory timeframe (typically 15 calendar days for serious/unexpected events)."
+    }
+  },
+  "as_is": {
+    "commit": "ec6a082ab5d74260adccd15c223dc2e2c064159e",
+    "working_tree_clean": true,
+    "generation_calls": 9,
+    "successful_live_calls": 0,
+    "errors": [
+      "404 NOT_FOUND. {'error': {'code': 404, 'message': 'This model models/gemini-2.5-flash-lite is no longer available to new users. Please update your code to use models/gemini-3.5-flash-lite for the latest features and improvements. We recommend you to use the Interactions API (https://ai.google.dev/gemini-api/docs/get-started).', 'status': 'NOT_FOUND'}}",
+      "404 NOT_FOUND. {'error': {'code': 404, 'message': 'This model models/gemini-2.5-pro is no longer available to new users. Please update your code to use models/gemini-3.1-pro-preview for the latest features and improvements. We recommend you to use the Interactions API (https://ai.google.dev/gemini-api/docs/get-started).', 'status': 'NOT_FOUND'}}"
+    ]
+  },
+  "supplemental_generation_calls": 1,
+  "total_verified_live_generation_calls": 14,
+  "regression_tests": {
+    "command": "python -m pytest tests/ evals/ -v",
+    "passed": 89,
+    "failed": 0,
+    "warnings": 1,
+    "live_credentials_disabled_for_regressions": true
+  }
+}

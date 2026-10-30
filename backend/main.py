@@ -353,8 +353,15 @@ def _require_authenticated_tenant(
 
 
 @app.post("/auth/token")
-def issue_session_token_endpoint(body: IssueTokenRequest) -> dict[str, Any]:
-    """Prototype token issuance for caller-supplied identities; not an identity-provider login."""
+def issue_session_token_endpoint(body: IssueTokenRequest, request: Request) -> dict[str, Any]:
+    """Issue a token, requiring the configured bootstrap secret on hosted deployments."""
+    bootstrap_secret = os.environ.get("MLR_GENIE_BOOTSTRAP_SECRET")
+    if bootstrap_secret:
+        supplied_secret = request.headers.get("x-mlr-bootstrap-secret")
+        if not supplied_secret:
+            raise HTTPException(status_code=401, detail="Bootstrap authentication required.")
+        if not hmac.compare_digest(supplied_secret.encode("utf-8"), bootstrap_secret.encode("utf-8")):
+            raise HTTPException(status_code=403, detail="Invalid bootstrap authentication.")
     role = body.role.strip() or "reviewer"
     try:
         token = issue_signed_session_token(
