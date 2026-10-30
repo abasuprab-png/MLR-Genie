@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import logging
 import re
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field, ValidationError, field_validator
 
 from backend.agent.mlr_genie_agent import MlrGenieAgent
 from backend.agent.models_router import GeminiModelRouter
@@ -40,7 +41,7 @@ from backend.integrations import COMMSRX_ARTIFACTS, MAX_REFERENCE_BYTES, Integra
 from backend.security import (
     ACCEPTANCE_AUTHORIZATIONS, REVIEWER_ROLES, ConfiguredCORSMiddleware, SecurityConfigurationError,
     artifact_directory, has_authorized_acceptance, hosted_mode, record_acceptance, signed_bearer_required,
-    signing_secret, validate_security_startup,
+    signing_secret, validate_security_startup, validate_token_role, validate_token_ttl,
 )
 from backend.tools.document_tools import (
     apply_accepted_changes,
@@ -62,6 +63,9 @@ from evals.pharma_comms_scenario_battery import run_pharma_comms_scenario_batter
 
 @asynccontextmanager
 async def security_lifespan(app: FastAPI):
+    # Uvicorn configures its own loggers; ensure application startup logs are visible.
+    # basicConfig preserves logging already configured by an embedding server.
+    logging.basicConfig(level=logging.INFO)
     validate_security_startup()
     yield
 
@@ -157,8 +161,18 @@ class ImportRdHandoffBody(BaseModel):
 class IssueTokenRequest(BaseModel):
     tenant_id: str
     actor_id: str
-    role: str = "reviewer"
-    ttl_seconds: int = Field(default=3600, gt=0)
+    role: str = "requester"
+    ttl_seconds: int = Field(default=3600, gt=0, strict=True, validate_default=True)
+
+    @field_validator("role")
+    @classmethod
+    def allowed_role(cls, value: str) -> str:
+        return validate_token_role(value)
+
+    @field_validator("ttl_seconds")
+    @classmethod
+    def allowed_lifetime(cls, value: int) -> int:
+        return validate_token_ttl(value)
 
 
 class ApprovalDayLabelDeltaRequest(BaseModel):
@@ -204,7 +218,7 @@ def _get_session_token_secret() -> bytes:
 def issue_signed_session_token(
     tenant_id: str,
     actor_id: str,
-    role: str = "reviewer",
+    role: str = "requester",
     ttl_seconds: int = 3600,
 ) -> str:
     """
@@ -215,13 +229,15 @@ def issue_signed_session_token(
     clean_actor = (actor_id or "").strip()
     if not clean_tenant or not clean_actor:
         raise ValueError("Both tenant_id and actor_id are required to issue a signed session token.")
+    clean_role = validate_token_role(role)
+    lifetime = validate_token_ttl(ttl_seconds)
     now = int(time.time())
     payload = {
         "tenant_id": clean_tenant,
         "actor_id": clean_actor,
-        "role": (role or "reviewer").strip(),
+        "role": clean_role,
         "iat": now,
-        "exp": now + int(ttl_seconds),
+        "exp": now + lifetime,
     }
     raw_json = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
     payload_b64 = base64.urlsafe_b64encode(raw_json).decode("ascii").rstrip("=")
@@ -427,7 +443,7 @@ def issue_session_token_endpoint(body: IssueTokenRequest, request: Request) -> d
             raise HTTPException(status_code=401, detail="Bootstrap authentication required.")
         if not hmac.compare_digest(supplied_secret.encode("utf-8"), bootstrap_secret.encode("utf-8")):
             raise HTTPException(status_code=403, detail="Invalid bootstrap authentication.")
-    role = body.role.strip() or "reviewer"
+    role = body.role
     try:
         token = issue_signed_session_token(
             tenant_id=body.tenant_id,

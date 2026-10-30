@@ -5,6 +5,7 @@ import hashlib
 import hmac
 import io
 import json
+import logging
 import time
 import zipfile
 
@@ -31,6 +32,8 @@ TEXT = "Signal stability improved by 20% in adults."
 def secured(monkeypatch, tmp_path):
     import backend.main as main
     monkeypatch.setenv("MLR_GENIE_ENV", "hosted")
+    monkeypatch.delenv("K_SERVICE", raising=False)
+    monkeypatch.delenv("MLR_GENIE_MAX_TOKEN_TTL_SECONDS", raising=False)
     monkeypatch.setenv("MLR_GENIE_SESSION_SECRET", HOSTED_KEY)
     monkeypatch.setenv("MLR_GENIE_BOOTSTRAP_SECRET", BOOTSTRAP)
     monkeypatch.setenv("MLR_REQUIRE_SIGNED_BEARER_TOKEN", "false")  # Cannot downgrade hosted mode.
@@ -158,8 +161,13 @@ def test_local_startup_warns_once_without_changing_prototype_auth(secured, monke
     main, client, _ = secured
     for key in ("MLR_GENIE_ENV", "MLR_GENIE_SESSION_SECRET", "MLR_GENIE_BOOTSTRAP_SECRET", "MLR_REQUIRE_SIGNED_BEARER_TOKEN"):
         monkeypatch.delenv(key, raising=False)
+    import backend.security as security
+    monkeypatch.setenv("MLR_GENIE_ALLOW_LOCAL", "true")
+    monkeypatch.setattr(security, "_server_bind_host", "127.0.0.1")
     with TestClient(main.app):
         assert client.get("/jobs/secured", headers={"X-Tenant-Id": "tenant", "X-Actor-Id": "local"}).status_code == 200
+        assert client.post("/auth/token", json={"tenant_id": "tenant", "actor_id": "local"}).status_code == 200
+        assert security.cors_policy() == (["*"], True)
     warnings = [r.message for r in caplog.records if r.name == "backend.security"]
     assert len(warnings) == 1
     for name in ("MLR_GENIE_SESSION_SECRET", "MLR_GENIE_BOOTSTRAP_SECRET", "MLR_REQUIRE_SIGNED_BEARER_TOKEN", "MLR_GENIE_ALLOWED_ORIGINS"):
@@ -167,11 +175,16 @@ def test_local_startup_warns_once_without_changing_prototype_auth(secured, monke
     assert LOCAL_SIGNING_SECRET not in warnings[0]
 
 
-@pytest.mark.parametrize("role", ["service", " SERVICE ", "unknown"])
+@pytest.mark.parametrize("role", ["requester", "service", " SERVICE ", "unknown"])
 @pytest.mark.parametrize("input_form", ["acceptedEdits", "comment", "job_comments", "intake_placed"])
 def test_service_cannot_accept_through_any_input_form(secured, role, input_form):
     main, client, pdf = secured
-    auth = headers(main, role=role, actor="commsrx-service")
+    # Existing signed claims with obsolete/unknown roles still cannot authorize edits.
+    claims = {"tenant_id": "tenant", "actor_id": "commsrx-service", "role": role,
+              "iat": int(time.time()), "exp": int(time.time()) + 600}
+    payload = base64.urlsafe_b64encode(json.dumps(claims).encode()).decode().rstrip("=")
+    signature = base64.urlsafe_b64encode(hmac.new(HOSTED_KEY.encode(), payload.encode(), hashlib.sha256).digest()).decode().rstrip("=")
+    auth = {"Authorization": "Bearer mlr1." + payload + "." + signature}
     if input_form in ("acceptedEdits", "comment"):
         payload = integration_payload()
         if input_form == "comment":
@@ -306,3 +319,208 @@ def test_opaque_artifact_ids_do_not_escape_or_collide_with_reserved_namespace(tm
     paths = [artifact_directory(tmp_path, jid) for jid in ids]
     assert len(set(paths)) == len(ids)
     assert all(p.resolve().is_relative_to(tmp_path) for p in paths)
+
+
+@pytest.mark.parametrize("mode", [None, "", "   "])
+@pytest.mark.parametrize("allow,bind,expected", [
+    (None, "127.0.0.1", True),
+    ("false", "127.0.0.1", True),
+    ("1", "127.0.0.1", True),
+    ("true", None, True),
+    ("true", "0.0.0.0", True),
+    ("true", "::", True),
+    ("true", "192.0.2.1", True),
+    ("true", "127.0.0.1", False),
+    ("true", "::1", False),
+])
+def test_implicit_local_requires_opt_in_and_known_loopback(monkeypatch, mode, allow, bind, expected):
+    import backend.security as security
+    monkeypatch.delenv("K_SERVICE", raising=False)
+    if mode is None:
+        monkeypatch.delenv("MLR_GENIE_ENV", raising=False)
+    else:
+        monkeypatch.setenv("MLR_GENIE_ENV", mode)
+    if allow is None:
+        monkeypatch.delenv("MLR_GENIE_ALLOW_LOCAL", raising=False)
+    else:
+        monkeypatch.setenv("MLR_GENIE_ALLOW_LOCAL", allow)
+    monkeypatch.setattr(security, "_server_bind_host", bind)
+    assert security.hosted_mode() is expected
+
+
+@pytest.mark.parametrize("cloud_service", ["mlr-genie", ""])
+def test_cloud_run_without_mode_is_hosted_and_refuses_missing_secrets(secured, monkeypatch, cloud_service):
+    import backend.security as security
+    main, client, _ = secured
+    monkeypatch.delenv("MLR_GENIE_ENV")
+    monkeypatch.setenv("K_SERVICE", cloud_service)
+    monkeypatch.setenv("MLR_GENIE_ALLOW_LOCAL", "true")
+    monkeypatch.setattr(security, "_server_bind_host", "127.0.0.1")
+    assert security.hosted_mode()
+    assert client.get("/jobs/secured", headers={"X-Tenant-Id": "tenant", "X-Actor-Id": "local"}).status_code == 401
+    monkeypatch.delenv("MLR_GENIE_SESSION_SECRET")
+    monkeypatch.delenv("MLR_GENIE_BOOTSTRAP_SECRET")
+    with pytest.raises(SecurityConfigurationError):
+        with TestClient(main.app):
+            pass
+
+
+@pytest.mark.parametrize("cloud_service", ["mlr-genie", ""])
+def test_cloud_run_refuses_explicit_local_mode(secured, monkeypatch, cloud_service):
+    main, _, _ = secured
+    monkeypatch.setenv("MLR_GENIE_ENV", "local")
+    monkeypatch.setenv("K_SERVICE", cloud_service)
+    with pytest.raises(SecurityConfigurationError):
+        with TestClient(main.app):
+            pass
+
+
+def test_hosted_startup_logs_resolved_mode_without_secrets(secured, caplog):
+    main, _, _ = secured
+    caplog.set_level(logging.INFO, logger="backend.security")
+    with TestClient(main.app):
+        pass
+    messages = [r.getMessage() for r in caplog.records if r.name == "backend.security"]
+    assert any("hosted" in message.lower() for message in messages)
+    assert all(HOSTED_KEY not in message and BOOTSTRAP not in message for message in messages)
+
+
+def test_default_role_token_cannot_accept_but_can_verify_cams(secured):
+    main, client, pdf = secured
+    response = client.post("/auth/token", headers={"X-MLR-Bootstrap-Secret": BOOTSTRAP},
+                           json={"tenant_id": "tenant", "actor_id": "requester-123"})
+    assert response.status_code == 200
+    assert response.json()["role"] == "requester"
+    token = response.json()["access_token"]
+    assert main.verify_signed_session_token(token)["role"] == "requester"
+    auth = {"Authorization": "Bearer " + token}
+    refused = integration_post(client, auth, pdf, integration_payload())
+    assert refused.status_code == 403
+    assert not main.router.telemetry_log
+    assert not main._job_artifact_dir("secured").parent.exists()
+    cams = integration_post(client, auth, pdf, {"claimText": TEXT}, path="/integrations/cams/verify-source")
+    assert cams.status_code == 200 and cams.json()["anchor"]["verdict"] == "supported"
+
+
+@pytest.mark.parametrize("role", ["requester", "service", "reviewer", "approver", " approver "])
+def test_token_issuer_accepts_only_explicit_supported_roles(secured, role):
+    main, client, _ = secured
+    response = client.post("/auth/token", headers={"X-MLR-Bootstrap-Secret": BOOTSTRAP},
+                           json={"tenant_id": "tenant", "actor_id": "actor", "role": role})
+    assert response.status_code == 200
+    assert response.json()["role"] == role.strip()
+    assert main.verify_signed_session_token(response.json()["access_token"])["role"] == role.strip()
+
+
+@pytest.mark.parametrize("role", ["unknown", "", "   ", "Reviewer", " SERVICE ", None, 123])
+def test_token_endpoint_rejects_unknown_or_blank_role(secured, role):
+    _, client, _ = secured
+    response = client.post("/auth/token", headers={"X-MLR-Bootstrap-Secret": BOOTSTRAP},
+                           json={"tenant_id": "tenant", "actor_id": "actor", "role": role})
+    assert response.status_code == 422 and "access_token" not in response.json()
+
+
+@pytest.mark.parametrize("role", ["reviewer", "approver"])
+def test_explicit_individual_roles_still_accept_edits(secured, role):
+    main, client, pdf = secured
+    response = client.post("/auth/token", headers={"X-MLR-Bootstrap-Secret": BOOTSTRAP},
+                           json={"tenant_id": "tenant", "actor_id": "individual-123", "role": role})
+    assert response.status_code == 200
+    auth = {"Authorization": "Bearer " + response.json()["access_token"]}
+    result = integration_post(client, auth, pdf, integration_payload())
+    assert result.status_code == 200, result.text
+    assert main.JOBS_DB[result.json()["job_id"]].comments[0].human_actor == "individual-123"
+
+
+def test_direct_signer_defaults_to_requester_and_rejects_unknown_role(secured):
+    main, _, _ = secured
+    token = main.issue_signed_session_token("tenant", "actor")
+    assert main.verify_signed_session_token(token)["role"] == "requester"
+    for role in ("unknown", "", " ", "Reviewer"):
+        with pytest.raises(ValueError):
+            main.issue_signed_session_token("tenant", "actor", role=role)
+
+
+@pytest.mark.parametrize("cap", [None, 7200, 86400])
+def test_hosted_token_ttl_rejects_above_cap_and_accepts_at_cap(secured, monkeypatch, cap):
+    main, client, _ = secured
+    if cap is not None:
+        monkeypatch.setenv("MLR_GENIE_MAX_TOKEN_TTL_SECONDS", str(cap))
+    effective_cap = cap or 3600
+    body = {"tenant_id": "tenant", "actor_id": "actor"}
+    auth = {"X-MLR-Bootstrap-Secret": BOOTSTRAP}
+    rejected = client.post("/auth/token", headers=auth, json={**body, "ttl_seconds": effective_cap + 1})
+    assert rejected.status_code == 422 and "access_token" not in rejected.json()
+    accepted = client.post("/auth/token", headers=auth, json={**body, "ttl_seconds": effective_cap})
+    assert accepted.status_code == 200
+    assert accepted.json()["expires_in"] == effective_cap
+    claims = main.verify_signed_session_token(accepted.json()["access_token"])
+    assert claims["exp"] - claims["iat"] == effective_cap
+    with pytest.raises(ValueError):
+        main.issue_signed_session_token("tenant", "actor", ttl_seconds=effective_cap + 1)
+
+
+@pytest.mark.parametrize("cap", ["0", "-1", "86401", "invalid", "3600.5", ""])
+def test_hosted_startup_refuses_invalid_token_ttl_configuration(secured, monkeypatch, cap):
+    main, _, _ = secured
+    monkeypatch.setenv("MLR_GENIE_MAX_TOKEN_TTL_SECONDS", cap)
+    with pytest.raises(SecurityConfigurationError):
+        with TestClient(main.app):
+            pass
+
+
+def test_explicit_local_token_lifetime_remains_positive_and_uncapped(secured, monkeypatch):
+    main, client, _ = secured
+    monkeypatch.setenv("MLR_GENIE_ENV", "local")
+    response = client.post("/auth/token", headers={"X-MLR-Bootstrap-Secret": BOOTSTRAP},
+                           json={"tenant_id": "tenant", "actor_id": "actor", "ttl_seconds": 86401})
+    assert response.status_code == 200 and response.json()["expires_in"] == 86401
+    for ttl in (0, -1, True, 1.5, "3600"):
+        with pytest.raises(ValueError):
+            main.issue_signed_session_token("tenant", "actor", ttl_seconds=ttl)
+
+
+
+def test_hosted_small_cap_also_validates_omitted_default_lifetime(secured, monkeypatch):
+    main, client, _ = secured
+    monkeypatch.setenv("MLR_GENIE_MAX_TOKEN_TTL_SECONDS", "120")
+    auth = {"X-MLR-Bootstrap-Secret": BOOTSTRAP}
+    body = {"tenant_id": "tenant", "actor_id": "actor"}
+    assert client.post("/auth/token", headers=auth, json=body).status_code == 422
+    assert client.post("/auth/token", headers=auth, json={**body, "ttl_seconds": 121}).status_code == 422
+    accepted = client.post("/auth/token", headers=auth, json={**body, "ttl_seconds": 120})
+    assert accepted.status_code == 200 and accepted.json()["expires_in"] == 120
+    with pytest.raises(ValueError):
+        main.issue_signed_session_token("tenant", "actor")
+
+
+@pytest.mark.parametrize("ttl", [True, False, 3600.5, "3600", None])
+def test_hosted_token_ttl_rejects_non_integer_representations(secured, ttl):
+    main, client, _ = secured
+    response = client.post("/auth/token", headers={"X-MLR-Bootstrap-Secret": BOOTSTRAP},
+                           json={"tenant_id": "tenant", "actor_id": "actor", "ttl_seconds": ttl})
+    assert response.status_code == 422
+    with pytest.raises(ValueError):
+        main.issue_signed_session_token("tenant", "actor", ttl_seconds=ttl)
+
+
+@pytest.mark.parametrize("host,expected_hosted", [("127.0.0.1", False), ("0.0.0.0", True)])
+def test_server_launcher_uses_actual_bound_socket_for_mode(monkeypatch, host, expected_hosted):
+    import sys
+    from types import SimpleNamespace
+    from backend import security, server
+    monkeypatch.delenv("MLR_GENIE_ENV", raising=False)
+    monkeypatch.delenv("K_SERVICE", raising=False)
+    monkeypatch.setenv("MLR_GENIE_ALLOW_LOCAL", "true")
+    monkeypatch.setattr(security, "_server_bind_host", None)
+    monkeypatch.setattr(sys, "argv", ["backend.server", "--host", host, "--port", "0"])
+    observed = []
+
+    def run(*, sockets):
+        assert sockets[0].getsockname()[0] == host
+        observed.append(security.hosted_mode())
+
+    monkeypatch.setattr(server.uvicorn, "Server", lambda config: SimpleNamespace(run=run, started=True))
+    server.main()
+    assert observed == [expected_hosted]
+    assert security._server_bind_host is None

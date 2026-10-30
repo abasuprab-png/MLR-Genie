@@ -259,6 +259,8 @@ def test_complete_copy_and_extracted_safety_claim_enter_active_review(offline):
 
 def test_required_live_failures_are_explicit_http_errors(monkeypatch, tmp_path, offline):
     import backend.main as main
+    monkeypatch.setenv("MLR_GENIE_ENV", "local")
+    monkeypatch.delenv("K_SERVICE", raising=False)
     monkeypatch.setattr(main, "JOBS_DB", DurableJobStore(tmp_path / "api.db"))
     monkeypatch.setattr(main, "router", offline)
     monkeypatch.setenv("MLR_REQUIRE_LIVE_GEMINI", "true")

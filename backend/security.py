@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import hashlib
+import ipaddress
 import json
 import logging
 import os
@@ -19,6 +20,10 @@ from backend.domain.schemas import JobRecord, ReviewComment
 LOCAL_SIGNING_SECRET = "mlr-genie-hmac-sha256-default-signing-key-v1"
 ACCEPTANCE_AUTHORIZATIONS = "accepted_comment_authorizations"
 REVIEWER_ROLES = frozenset(("reviewer", "approver"))
+TOKEN_ROLES = frozenset(("requester", "service", "reviewer", "approver"))
+# Only the supported launcher registers the address of its actual bound socket.
+# An arbitrary ASGI server's unknown bind address cannot enable implicit local mode.
+_server_bind_host: str | None = None
 
 
 class SecurityConfigurationError(RuntimeError):
@@ -26,10 +31,50 @@ class SecurityConfigurationError(RuntimeError):
 
 
 def hosted_mode() -> bool:
-    mode = os.getenv("MLR_GENIE_ENV", "local").strip().lower() or "local"
-    if mode not in ("local", "hosted"):
+    mode = os.getenv("MLR_GENIE_ENV", "").strip().lower()
+    if mode not in ("", "local", "hosted"):
         raise SecurityConfigurationError("MLR_GENIE_ENV must be local or hosted.")
-    return mode == "hosted"
+    if "K_SERVICE" in os.environ:
+        if mode == "local":
+            raise SecurityConfigurationError("Local mode is forbidden on Cloud Run (K_SERVICE is set).")
+        return True
+    if mode:
+        return mode == "hosted"
+    if os.getenv("MLR_GENIE_ALLOW_LOCAL", "").strip().lower() != "true":
+        return True
+    try:
+        return not ipaddress.ip_address(_server_bind_host or "").is_loopback
+    except ValueError:
+        return True
+
+
+def max_token_ttl_seconds() -> int:
+    """Validate configuration rather than silently accepting an unsafe cap."""
+    configured = os.getenv("MLR_GENIE_MAX_TOKEN_TTL_SECONDS", "3600")
+    try:
+        limit = int(configured)
+    except ValueError as exc:
+        raise SecurityConfigurationError("MLR_GENIE_MAX_TOKEN_TTL_SECONDS must be an integer from 1 to 86400.") from exc
+    if not 1 <= limit <= 86400:
+        raise SecurityConfigurationError("MLR_GENIE_MAX_TOKEN_TTL_SECONDS must be an integer from 1 to 86400.")
+    return limit
+
+
+def validate_token_role(role: str) -> str:
+    clean_role = role.strip() if isinstance(role, str) else ""
+    if clean_role not in TOKEN_ROLES:
+        raise ValueError("role must be requester, service, reviewer, or approver.")
+    return clean_role
+
+
+def validate_token_ttl(ttl_seconds: int) -> int:
+    if type(ttl_seconds) is not int or ttl_seconds <= 0:
+        raise ValueError("ttl_seconds must be a positive integer.")
+    if hosted_mode():
+        limit = max_token_ttl_seconds()
+        if ttl_seconds > limit:
+            raise ValueError(f"ttl_seconds must not exceed {limit} in hosted mode.")
+    return ttl_seconds
 
 
 def signing_secret() -> bytes:
@@ -71,9 +116,12 @@ def cors_policy() -> tuple[list[str], bool]:
 
 
 def validate_security_startup() -> None:
+    hosted = hosted_mode()
+    logging.getLogger(__name__).info("Resolved MLR Genie security mode: %s", "hosted" if hosted else "local")
     secret = signing_secret()
     origins, _ = cors_policy()
-    if hosted_mode():
+    if hosted:
+        max_token_ttl_seconds()
         return
     relaxed = []
     if secret == LOCAL_SIGNING_SECRET.encode() or not secret.strip() or len(secret) < 32:
