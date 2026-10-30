@@ -9,6 +9,7 @@ import json
 import math
 import os
 from pathlib import Path
+import re
 import secrets
 import sys
 import tempfile
@@ -87,6 +88,36 @@ def verify_pdf_anchor(pdf_bytes: bytes, result: dict) -> dict:
                 "quote_matches_pdf_rectangle": True, "page_count": len(pdf)}
 
 
+def api_failure_summary(response: httpx.Response) -> str:
+    """Report assessment failure categories without echoing document or credential data."""
+    summary = f"HTTP {response.status_code}"
+    try:
+        body = response.json()
+    except ValueError:
+        return summary
+    if not isinstance(body, dict) or body.get("assessment_failed") is not True:
+        return summary
+    detail = body.get("detail")
+    if not isinstance(detail, str):
+        return summary + " (assessment failed)"
+    if "live Gemini assessment required but unavailable." in detail:
+        reason = "live assessment unavailable"
+    elif detail.endswith(": invalid structured Gemini assessment."):
+        reason = "structured assessment invalid"
+    elif detail.endswith(": cited span is absent from the supplied text."):
+        reason = "assessment citation absent from supplied text"
+    elif detail == "Integration verification requires successful live Gemini calls.":
+        reason = "live claim-verification receipts missing"
+    elif detail == "Live Gemini verification required but unavailable.":
+        reason = "live client unavailable"
+    else:
+        reason = "assessment failed"
+    status = re.search(r"\(provider HTTP ([1-5][0-9]{2})\)", detail)
+    if status:
+        reason += "; provider HTTP " + status.group(1)
+    return summary + " (" + reason + ")"
+
+
 @contextmanager
 def isolated_hosted_server(run: Path):
     """Keep this process's test credentials and storage separate from deployment."""
@@ -154,7 +185,7 @@ def run_evaluation(args) -> Path:
                            "title": args.reference_pdf.name}})},
                 files={"reference_pdf": (args.reference_pdf.name, pdf_bytes, "application/pdf")})
             if verified.status_code != 200:
-                raise RuntimeError(f"Journal verification returned HTTP {verified.status_code}.")
+                raise RuntimeError(f"Journal verification returned {api_failure_summary(verified)}.")
             result = verified.json()
         anchor_check = verify_pdf_anchor(pdf_bytes, result)
         receipts = result.get("telemetry_receipts")

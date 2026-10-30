@@ -115,7 +115,7 @@ gcloud compute addresses describe mlr-genie-https --global \
 ```
 
 Deployment waits for the managed certificate and public health/auth checks, runs
-the live TypeScript integration and real-journal evaluations, then verifies the
+the live TypeScript integration and real-journal evaluations, and verifies the
 same job, all four artifact hashes, and individual reviewer provenance after a
 same-image Cloud Run revision replacement. A short-lived Cloud Run job first
 probes Vertex with fixed public synthetic text under the application's runtime

@@ -2,8 +2,9 @@ from copy import deepcopy
 
 import pymupdf
 import pytest
+import httpx
 
-from evals.live_journal_verification import parse_args, verify_pdf_anchor
+from evals.live_journal_verification import api_failure_summary, parse_args, verify_pdf_anchor
 
 
 @pytest.fixture
@@ -66,3 +67,29 @@ def test_remote_preflight_requires_existing_secret_without_generating_one(monkey
     assert error.value.code == 2
     import os
     assert "MLR_GENIE_BOOTSTRAP_SECRET" not in os.environ
+
+
+@pytest.mark.parametrize("detail,expected", [
+    ("cv08_pv_gate: live Gemini assessment required but unavailable. (provider HTTP 429)",
+     "HTTP 502 (live assessment unavailable; provider HTTP 429)"),
+    ("cv08_pv_gate: invalid structured Gemini assessment.", "HTTP 502 (structured assessment invalid)"),
+    ("Integration verification requires successful live Gemini calls.",
+     "HTTP 502 (live claim-verification receipts missing)"),
+    ("cv08_pv_gate: cited span is absent from the supplied text.",
+     "HTTP 502 (assessment citation absent from supplied text)"),
+])
+def test_assessment_failure_reports_only_the_controlled_category_and_provider_status(detail, expected):
+    response = httpx.Response(502, json={"assessment_failed": True, "detail": detail})
+    assert api_failure_summary(response) == expected
+
+
+def test_failure_summary_does_not_echo_unknown_details_credentials_or_validation_inputs():
+    private = "private-document-content Bearer private-session-token"
+    for body in (
+        {"assessment_failed": True, "detail": private},
+        {"detail": [{"input": private}]},
+        {"assessment_failed": True, "detail": "live Gemini assessment required but unavailable. " + private},
+    ):
+        summary = api_failure_summary(httpx.Response(502, json=body))
+        assert private not in summary and "private-session-token" not in summary
+    assert api_failure_summary(httpx.Response(503, text=private)) == "HTTP 503"
