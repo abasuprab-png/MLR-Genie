@@ -1,10 +1,16 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
+import hashlib
+import json
 import re
 from typing import Any
 
 from backend.agent.models_router import GeminiModelRouter
+from backend.agent.gemini_gateway import GeminiGateway, ModelAssessmentError, require_verbatim
+from backend.domain.assessments import (
+    CommentAssessment, CommentConflict, IntakeAssessment, LabelAssessment, VerifiedSafetyFinding,
+)
 from backend.domain.schemas import (
     AdvisoryFinding,
     CommentCategory,
@@ -81,12 +87,50 @@ def screen_pharmacovigilance_cv08(
     )
     flagged = (matched_marker is not None) or paraphrase_icsr
 
-    active_router.create_interaction(
+    assessment, telemetry = GeminiGateway(active_router).assess(
         task_type="cv08_pv_gate",
-        prompt=f"Screen intake for CV-08 ICSR: {intake_text[:200]}",
-        system_instruction="Screen for individual patient adverse event reports (CV-08).",
-        fallback_payload={"flagged": flagged},
+        inputs={"submitted_copy": intake_text},
+        instruction=(
+            "Extract factual claims and safety statements from the complete submitted copy. "
+            "Identify individual people reporting adverse experiences after product exposure, "
+            "including indirect and paraphrased descriptions. Distinguish these narratives from "
+            "general safety information and quoted training examples. For each individual_adverse_event "
+            "cite the patient, product exposure, and adverse event within its verbatim narrative span. "
+            "For other findings use empty strings for inapplicable patient/product/event spans. "
+            "Claims are assertions requiring review, not verified facts."
+        ),
+        schema=IntakeAssessment,
+        offline=IntakeAssessment(claims=[], safety_findings=[]),
     )
+    # Validate the entire response before mutating the job, including nested evidence.
+    for claim in assessment.claims:
+        require_verbatim(claim.span, intake_text, context="intake claim")
+    for finding in assessment.safety_findings:
+        require_verbatim(finding.span, intake_text, context="safety finding")
+        for span in (finding.patient_span, finding.product_span, finding.event_span):
+            if span or finding.kind == "individual_adverse_event":
+                require_verbatim(span, finding.span, context="safety evidence")
+    digest = hashlib.sha256(intake_text.encode()).hexdigest()
+    job.metadata["intake_assessment"] = {
+        **assessment.model_dump(), "source_sha256": digest, "telemetry": telemetry.model_dump(),
+    }
+    job.metadata.setdefault("assessment_telemetry_receipts", []).append(telemetry.model_dump())
+    for finding in assessment.safety_findings:
+        verified = VerifiedSafetyFinding(
+            **finding.model_dump(), start=intake_text.index(finding.span),
+            end=intake_text.index(finding.span) + len(finding.span), source_sha256=digest,
+            used_live_sdk=telemetry.used_live_sdk,
+        )
+        existing_index = next((i for i, old in enumerate(job.safety_findings)
+                               if (old.source_sha256, old.kind, old.span)
+                               == (verified.source_sha256, verified.kind, verified.span)), None)
+        if existing_index is None:
+            job.safety_findings.append(verified)
+        else:
+            job.safety_findings[existing_index] = verified
+    # Live semantic findings are authoritative. Offline screening retains its existing behavior.
+    if telemetry.used_live_sdk:
+        flagged = any(f.kind == "individual_adverse_event" for f in assessment.safety_findings)
     if flagged:
         job.pv_icrs_flagged = True
         job.state = JobLifecycleState.HOLD
@@ -98,11 +142,21 @@ def screen_pharmacovigilance_cv08(
             "cv08_flagged": True,
             "routing_note": job.pv_routing_note,
             "model_used": "gemini-3.5-flash-lite",
+            "assessment": assessment.model_dump(),
+            "telemetry": telemetry.model_dump(),
+            "used_live_sdk": telemetry.used_live_sdk,
         }
+    if telemetry.used_live_sdk and (assessment.claims or assessment.safety_findings):
+        if job.state == JobLifecycleState.DRAFT:
+            job.state = JobLifecycleState.IN_REVIEW
+        job.next_action = "Review extracted claims and safety findings"
     return {
         "cv08_flagged": False,
         "routing_note": None,
         "model_used": "gemini-3.5-flash-lite",
+        "assessment": assessment.model_dump(),
+        "telemetry": telemetry.model_dump(),
+        "used_live_sdk": telemetry.used_live_sdk,
     }
 
 
@@ -317,21 +371,28 @@ def import_and_reconcile_comments(
     """
     active_router = router or GeminiModelRouter()
 
-    # Incremental merge by comment_id (Probe 18)
-    merged_by_id: dict[str, ReviewComment] = {c.comment_id: c for c in job.comments}
-    for c in raw_comments:
+    def fingerprint(c: ReviewComment) -> str:
+        content = {k: c.model_dump()[k] for k in (
+            "comment_id", "reviewer_name", "reviewer_role", "timestamp", "anchored_passage",
+            "target_sentence_id", "comment_text", "proposed_spans",
+        )}
+        return hashlib.sha256(json.dumps(content, sort_keys=True).encode()).hexdigest()
+
+    # Work on copies: invalid model responses must not partially mutate saved decisions.
+    merged_by_id = {c.comment_id: c.model_copy(deep=True) for c in job.comments}
+    explicit = {c.comment_id: c.human_decision for c in raw_comments
+                if c.human_decision in ("accepted", "rejected")}
+    for incoming in raw_comments:
+        c = incoming.model_copy(deep=True)
         existing_c = merged_by_id.get(c.comment_id)
-        if (
-            existing_c is not None
-            and existing_c.placement_status == "placed"
-            and c.human_decision == "accepted"
-        ):
-            c.placement_status = "placed"
+        if existing_c is not None and fingerprint(existing_c) == fingerprint(c):
+            if c.comment_id not in explicit:
+                c.human_decision = existing_c.human_decision
+                c.human_actor = existing_c.human_actor
+            c.placement_status = existing_c.placement_status
             c.provenance = existing_c.provenance
-            c.human_actor = existing_c.human_actor or c.human_actor
-        elif existing_c is None or existing_c.placement_status != "placed":
-            if c.human_decision == "accepted" and c.placement_status == "placed":
-                c.placement_status = "pending"
+        else:
+            c.placement_status = "pending"
         merged_by_id[c.comment_id] = c
     all_comments = list(merged_by_id.values())
 
@@ -344,6 +405,70 @@ def import_and_reconcile_comments(
             if _comments_overlap_or_share_target(c1, c2) and _comments_have_conflicting_edits(c1, c2):
                 conflict_adj[c1.comment_id].add(c2.comment_id)
                 conflict_adj[c2.comment_id].add(c1.comment_id)
+
+    assessment, telemetry = GeminiGateway(active_router).assess(
+        task_type="comment_reconciliation",
+        inputs={"comments": [c.model_dump() for c in all_comments]},
+        instruction=(
+            "Identify pairs of incompatible reviewer instructions concerning the same passage or claim. "
+            "Return each conflicting pair of supplied comment IDs once with a rationale. "
+            "Do not decide which reviewer wins: application code applies explicit human resolutions."
+        ),
+        schema=CommentAssessment,
+        offline=CommentAssessment(conflicts=[
+            CommentConflict(comment_ids=[a, b], rationale="Overlapping incompatible edits.")
+            for a, peers in conflict_adj.items() for b in peers if a < b
+        ]),
+    )
+    for conflict in assessment.conflicts:
+        a, b = conflict.comment_ids
+        if a == b or a not in merged_by_id or b not in merged_by_id:
+            raise ModelAssessmentError("comment reconciliation: unknown or duplicate comment citation.")
+        conflict_adj[a].add(b)
+        conflict_adj[b].add(a)
+
+    versions = {c.comment_id: fingerprint(c) for c in all_comments}
+    resolutions = list(job.metadata.get("comment_resolutions", []))
+    for cid, decision in explicit.items():
+        covered = {cid}
+        queue = [cid]
+        while queue:
+            current = queue.pop()
+            # A decision covers all already-known comments on its target, even if a
+            # later model response describes their incompatibility differently.
+            peers = conflict_adj[current] | {
+                c.comment_id for c in all_comments
+                if _comments_overlap_or_share_target(merged_by_id[current], c)
+            }
+            for peer in peers:
+                if peer not in covered:
+                    covered.add(peer)
+                    queue.append(peer)
+        # Simultaneously accepting incompatible edits is still an unresolved conflict.
+        if decision == "accepted" and any(
+            explicit.get(peer) == "accepted" for peer in covered if peer != cid
+        ):
+            continue
+        resolutions.append({
+            "comment_id": cid, "decision": decision,
+            "covered_versions": {peer: versions[peer] for peer in covered},
+            "resolved_at": datetime.now(timezone.utc).isoformat(),
+            "actor": merged_by_id[cid].human_actor,
+        })
+
+    def resolved(a: str, b: str) -> bool:
+        if explicit.get(a) == explicit.get(b) == "accepted":
+            return False
+        for resolution in reversed(resolutions):
+            covered = resolution["covered_versions"]
+            if covered.get(a) == versions[a] and covered.get(b) == versions[b]:
+                if resolution["decision"] == "accepted" or resolution["comment_id"] in (a, b):
+                    return True
+        return False
+
+    for c in all_comments:
+        c.conflicts_with_comment_Ids = []
+    conflict_adj = {a: {b for b in peers if not resolved(a, b)} for a, peers in conflict_adj.items()}
 
     visited: set[str] = set()
     conflict_groups: list[dict[str, Any]] = []
@@ -384,19 +509,17 @@ def import_and_reconcile_comments(
             }
         )
 
-    active_router.create_interaction(
-        task_type="comment_reconciliation",
-        prompt=f"Reconcile {len(all_comments)} comments for job {job.job_id}",
-        system_instruction="Group comments, preserve verbatim wording, and expose conflicts for human decision.",
-        fallback_payload={"imported_count": len(all_comments), "conflicts": len(conflict_groups)},
-    )
-
+    job.metadata["comment_resolutions"] = resolutions
+    job.metadata.setdefault("assessment_telemetry_receipts", []).append(telemetry.model_dump())
     job.comments = all_comments
     return {
         "imported_count": len(job.comments),
         "conflict_groups": conflict_groups,
         "requires_human_resolution": len(conflict_groups) > 0,
         "model_used": "gemini-4-argon",
+        "model_assessment": assessment.model_dump(),
+        "used_live_sdk": telemetry.used_live_sdk,
+        "telemetry": telemetry.model_dump(),
     }
 
 
@@ -406,6 +529,7 @@ def analyze_approval_day_label_delta(
     final_approved_label: dict[str, Any],
     launch_kit_assets: list[dict[str, Any]],
     router: GeminiModelRouter | None = None,
+    require_live: bool = False,
 ) -> dict[str, Any]:
     """
     Section 6 & Section 11 Acceptance Cases 6, 8, 9:
@@ -531,12 +655,78 @@ def analyze_approval_day_label_delta(
         if any("indication" in r.lower() for a in affected_assets for r in a["impact_reasons"]):
             matched_scenario = None
 
-    _, telemetry = active_router.create_interaction(
+    from backend.tools.document_tools import split_medical_sentences
+
+    def approved_strings(value: Any) -> list[str]:
+        if isinstance(value, dict):
+            return [s for k, v in value.items() if k != "old_value" for s in approved_strings(v)]
+        if isinstance(value, list):
+            return [s for v in value for s in approved_strings(v)]
+        return [str(value)] if value is not None and str(value).strip() else []
+
+    sections = {
+        key: {"approved_text": approved_strings(value), "final_value": value,
+              "prepared_values": [s.get(key) for s in prepared_scenarios]}
+        for key, value in final_approved_label.items()
+        if approved_strings(value) and (
+            not any(s.get(key) == value for s in prepared_scenarios)
+            or (key == "section_14_clinical_figures" and section_14_clinical_figures)
+        )
+    }
+    asset_claims = {
+        asset["asset_id"]: list(dict.fromkeys(split_medical_sentences(asset.get("body", ""))))
+        for asset in launch_kit_assets
+    }
+    assessment, telemetry = GeminiGateway(active_router, require_live=require_live).assess(
         task_type="approval_day_label_delta",
-        prompt=f"Compare final indication '{final_indication}' against {len(prepared_scenarios)} scenarios.",
-        system_instruction="Identify out-of-scenario label changes and affected launch kit assets.",
-        fallback_payload={"in_scenario": matched_scenario is not None},
+        inputs={"changed_sections": sections, "prepared_scenarios": prepared_scenarios,
+                "final_approved_label": final_approved_label, "asset_claims": asset_claims,
+                "deterministic_affected_assets": affected_assets},
+        instruction=(
+            "Assess how every changed label section affects every supplied asset claim. Return exactly "
+            "one impact per (section, asset_id, claim_quote) combination, including impact=none when "
+            "unrelated. Copy claim_quote exactly from asset_claims. For label_quote copy a nonempty "
+            "verbatim span from that section's approved_text, never an old_value. Evaluate meaning, "
+            "population, endpoints, mechanism uncertainty, and clinical figures in context. Propose "
+            "revised wording for each impacted claim, preserving appropriate qualifications. "
+            "Proposals require human approval. Determine whether the final label fits a prepared scenario."
+        ),
+        schema=LabelAssessment,
+        offline=LabelAssessment(fits_prepared_scenario=matched_scenario is not None,
+                                rationale="Offline deterministic section diff only.", impacts=[]),
     )
+    layer_one_assets = [dict(a) for a in affected_assets]
+    if telemetry.used_live_sdk:
+        expected = {(section, asset_id, claim) for section in sections
+                    for asset_id, claims in asset_claims.items() for claim in claims}
+        actual = set()
+        for impact in assessment.impacts:
+            key = (impact.section, impact.asset_id, impact.claim_quote)
+            if key not in expected or key in actual:
+                raise ModelAssessmentError("label diff: unknown or duplicate section/asset/claim citation.")
+            actual.add(key)
+            if not impact.label_quote.strip() or not any(
+                impact.label_quote in text for text in sections[impact.section]["approved_text"]
+            ):
+                raise ModelAssessmentError("label diff: label quote is absent from the supplied approved text.")
+            if impact.impact != "none" and not impact.proposed_wording.strip():
+                raise ModelAssessmentError("label diff: impacted claim is missing proposed wording.")
+        if actual != expected:
+            raise ModelAssessmentError("label diff: incomplete section-by-claim assessment.")
+        affected_by_id = {a["asset_id"]: a for a in affected_assets}
+        for impact in assessment.impacts:
+            if impact.impact == "none":
+                continue
+            asset = affected_by_id.setdefault(impact.asset_id, {
+                "asset_id": impact.asset_id, "title": impact.asset_id,
+                "impact_reasons": [], "requires_human_reapproval": True,
+            })
+            # Copy lists so the retained Layer 1 result remains unchanged.
+            asset["impact_reasons"] = [*asset["impact_reasons"], impact.rationale]
+            asset.setdefault("model_impacts", []).append(impact.model_dump())
+        affected_assets = list(affected_by_id.values())
+        if not assessment.fits_prepared_scenario:
+            matched_scenario = None
 
     return {
         "fits_prepared_scenario": matched_scenario is not None,
@@ -565,6 +755,11 @@ def analyze_approval_day_label_delta(
         "new_review_path_required": matched_scenario is None or len(affected_assets) > 0,
         "model_used": telemetry.model,
         "service_tier": telemetry.service_tier,
+        "layer_one_affected_assets": layer_one_assets,
+        "model_assessment": assessment.model_dump(),
+        "used_live_sdk": telemetry.used_live_sdk,
+        "telemetry": telemetry.model_dump(),
+        "label_quotes_verified": telemetry.used_live_sdk,
     }
 
 

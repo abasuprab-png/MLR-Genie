@@ -1,120 +1,145 @@
 # Live SDK verification and red-team results — October 30, 2026
 
-The live SDK transport works after the changes in this revision. The five-point
-product check is **not a clean pass**: accepted conflicting comments are not
-applied, and a paraphrased patient adverse event is not placed on hold. Label and
-comment tools also fail to supply their actual inputs to Gemini and ignore its
-responses. No clinical keyword lists were added to make these checks pass.
+**All five live red-team checks pass after fixing the application wiring gaps
+reported at `1fae0cc`.** The final run made **19/19 successful, unmocked Gemini
+generation calls**, with zero `provider_error` results. Every generation receipt
+records `used_live_sdk: true` and `transport_mode: generate_content`.
+No clinical keyword lists or scenario-specific application rules were added.
 
-## Method and initial result
+## Five-point results
 
-The initial run used the unmodified `ec6a082ab5d74260adccd15c223dc2e2c064159e`
-checkout, the environment's `GEMINI_API_KEY`, a real Uvicorn server, real HTTP
-requests, and an actual `google.genai.Client`. There were no model/SDK mocks.
-All clinical content and identities were synthetic. Python return-value
-observation recorded model responses without replacing calls or outputs.
+| Check | Live observed result | Result |
+| --- | --- | --- |
+| Supported clinical claim in a two-page, two-column PDF | `supported`; PyMuPDF box `[2, 54.0, 96.0, 285.25, 137.12]` is within the page and independent clipped extraction matches the source quote. | **Pass** |
+| Population shifted from adults to children | `contradicted` after uploading the same PDF to the shifted job; live generation uses the reference context. | **Pass** |
+| Approval-Day Section 12.1 hedge and Section 14 clinical figure update | `fits_prepared_scenario: false`; Gemini flags both affected claims in `launch_brief` and proposes the qualified mechanism wording and replacement of 38% with 35%. All model label quotes are verified verbatim in code. | **Pass** |
+| Conflicting Medical/Regulatory comments, then human acceptance | Initially `requires_human_resolution: true`; accepting Medical and rejecting Regulatory produces `false`, preserves those decisions, and applies “lowered the risk.” The clean DOCX matches the job revision; redline XML contains real `<w:del>` and `<w:ins>` elements. | **Pass** |
+| Paraphrased individual adverse event | `cv08_flagged: true`, state `hold`; verified patient, product, and event spans are stored as a structured safety finding. | **Pass** |
 
-The sequence was `/auth/token`, `/jobs/intake`, working DOCX upload, reference PDF
-upload, conflicting `/comments`, `/diff-label`, acceptance of one comment and
-rejection of the other, then `/execute-file-roundtrip`.
+The ordinary intake also enters `in_review` with extracted claims and safety
+findings. The adverse-event intake enters the stricter CV-08 `hold` before
+creating communications revisions. Its narrative was unchanged from the
+previous failing check:
 
-The initial run returned HTTP 200 from these routes but recorded **nine
-`provider_error` generation results**. Google returned 404 for the mapped
-`gemini-2.5-pro` and `gemini-2.5-flash-lite` IDs, stating they were unavailable to
-new users on this account. A successful application HTTP response did not mean a
-successful model call.
+> My aunt became so light-headed that she crumpled to the kitchen floor after
+> swallowing her first Aurenix tablet; paramedics took her straight to hospital.
 
-The authenticated model catalog listed `gemini-3.1-pro-preview`,
-`gemini-3.8-flash`, `gemini-4-argon`, and `gemini-3.5-flash-lite`.
-`gemini-4-argon` did not advertise `createCachedContent`; the Pro preview model
-did. Deep review now uses `gemini-3.1-pro-preview`, orchestration resolves to
-`gemini-3.8-flash`, and PV gating resolves to `gemini-3.5-flash-lite`.
-Orchestration and embeddings were not invoked by this end-to-end workflow.
+## What changed
 
-A subsequent live request isolated another error: Google returned 400 when
-`cached_content` and `system_instruction` were both supplied to generation.
-The previous router silently retried without the cache. The corrected request
-places the per-turn instruction in the input and keeps the cache's system
-instruction, so PDF-backed verification retains its reference context.
-No fenced-JSON or safety-field validation errors occurred in the executed calls.
+**Label assessment:** The existing deterministic section/text diff remains
+Layer 1. `GeminiGateway` sends the changed sections, prepared scenarios, and
+asset claims in one structured-schema call. The application validates complete
+section-by-claim coverage, asset references, and verbatim approved-label quotes
+before merging model findings with the deterministic result. Proposed wording
+requires human approval; it is not automatically applied to assets.
 
-## Final transport evidence
+The live model returned six section/claim assessments, including two revisions:
 
-The final full workflow completed with **13/13 live generation calls**, zero
-`provider_error` results, a successfully created live reference cache, and six
-JSON responses that validated as `ClaimVerificationVerdict` objects. All
-generation telemetry entries recorded `used_live_sdk: true` and
-`transport_mode: generate_content`. PDF-backed generation retained its cache.
-A supplemental population-shift request uploaded the same PDF to the shifted
-job and verified `contradicted` with a live, cached Gemini call: **14/14 successful
-generation calls in the final workflow plus that supplemental check**.
+- Section 12.1: “Aurenix is thought to reduce receptor signaling; the mechanism in
+  humans has not been fully established.”
+- Section 14: the efficacy claim is revised to 35%, citing the supplied approved
+  value `35%` verbatim.
 
-`ModelCallTelemetry.model` still records the logical role. Its new
-`effective_model` field and the job's claim receipts record the SDK model ID.
-Representative final job receipt:
+The response includes the full `model_assessment`, `used_live_sdk`, verified-quote
+status, and telemetry. Configured live mode, `MLR_REQUIRE_LIVE_GEMINI=true`, or
+`require_live: true` on `/diff-label` prohibits silent local fallback. Provider
+failure, empty/invalid output, unknown citations, or incomplete coverage returns
+HTTP 502 with `assessment_failed: true`.
+
+**Human resolution:** Decisions record the versions of known comments on the
+target and the authenticated human actor. Reimporting unchanged comments or
+reloading storage preserves the resolution. A new or changed conflicting
+comment reopens review; simultaneous incompatible acceptances remain unresolved.
+The accepted edit reaches the existing atomic edit and OOXML generation paths.
+
+**Claim and safety extraction:** The complete submitted copy reaches Gemini
+under a structured schema. Application code checks every cited span, including
+patient/product/event evidence, before storing findings. Findings have source
+hashes and offsets, merge without duplication, and update job state. Model
+claims and safety statements enter claim verification even when the previous
+paragraph filter would skip them. Claim verification now receives authorized
+source passages explicitly, including when there is no usable cache.
+
+## Live transport and artifacts
+
+Final run: `run-a8c4a0ad76`, using a real Uvicorn server, real HTTP requests, the
+environment API key, and `google.genai.Client`. All documents and identities were
+synthetic. No model calls, responses, or SDK methods were mocked or replaced.
+The test observed returned responses without altering execution.
+
+| Task | Calls | Effective model | Transport | `used_live_sdk` |
+| --- | ---: | --- | --- | --- |
+| Claim verification | 12 | `gemini-3.1-pro-preview` | `generate_content` | `true` |
+| Comment reconciliation | 2 | `gemini-3.1-pro-preview` | `generate_content` | `true` |
+| Approval-Day label diff | 1 | `gemini-3.1-pro-preview` | `generate_content` | `true` |
+| Claim/safety extraction and CV-08 screening | 4 | `gemini-3.5-flash-lite` | `generate_content` | `true` |
+
+All 12 claim responses validated as `ClaimVerificationVerdict`. PDF-backed calls
+retained live reference caches. Logical role IDs remain separate from actual SDK
+model IDs; orchestration and embeddings were not exercised by this workflow.
+
+The job persists claim receipts in `metadata.telemetry_receipts` and safety,
+comment, and label receipts in `metadata.assessment_telemetry_receipts`.
+A representative final claim receipt is:
 
 ```json
 {
   "used_live_sdk": true,
   "effective_model": "gemini-3.1-pro-preview",
-  "transport": "generate_content"
+  "transport": "generate_content",
+  "verification_mode": "live_sdk_execution"
 }
 ```
 
-| Task | Actual model | Transport | Live |
-| --- | --- | --- | --- |
-| Claim verification, comments, label diff | `gemini-3.1-pro-preview` | `generate_content` | `true` |
-| PV screening | `gemini-3.5-flash-lite` | `generate_content` | `true` |
+`execute-file-roundtrip` produced and validated:
 
-Live transport success establishes that requests reached the provider; it does
-not establish that a caller supplied sufficient context or used the response.
-The returned retention and service-tier configuration flags were not independent
-provider attestations and are not relied on here.
+- `04_revised_clean_v2.docx`: contains “lowered the risk” and matches the revised
+  job body; the original DOCX retains “reduced the risk.”
+- `05_tracked_changes_redline_v1_to_v2.docx`: `word/document.xml` deletes “reduced
+  the risk” and inserts “lowered the risk.”
+- `03_annotated_reference.pdf`: contains reference annotations.
+- `06_resubmission_package.zip`: passes ZIP integrity validation.
 
-## Five-point outcomes
+The HTTP sequence covered token issuance, intake, DOCX upload, PDF upload,
+conflicting comments, label diff, accepting/rejecting comments, and file
+roundtrip, followed by the shifted-population PDF workflow and adverse-event
+intake. Every endpoint returned HTTP 200. A temporary process-local bootstrap
+secret also verified missing header → 401, wrong header → 403, and correct header
+→ 200. This did not change the environment's hosted bootstrap configuration.
 
-| Check | Observed result | Assessment |
-| --- | --- | --- |
-| Supported claim in a two-page, two-column PDF | `supported`; valid box `[2, 54.0, 96.0, 285.25, 137.12]`. Independent PyMuPDF extraction from that box matched the reference quote. | Pass |
-| Population shifted from adults to children | Application classification `contradicted`, not `supported`. | Pass for the required classification; supplemental PDF-backed evidence is recorded in the JSON report. |
-| Section 12.1 MoA hedge plus Section 14 change from 38% to 35% | `fits_prepared_scenario: false`; launch asset flagged for both changes. | API flags correct, but **not a live semantic pass**: Gemini asked for the label, scenarios, and assets because the prompt omitted them. |
-| Conflicting Medical/Regulatory comments, then accept one edit | Conflict detection returned `requires_human_resolution: true`. Submitting one accepted and one rejected comment reset **both** to `escalated`. | **Fail:** the accepted edit was not applied. |
-| Paraphrased patient adverse event | Gemini identified an individual patient, suspect drug, adverse event, and need for safety review. The API returned `cv08_flagged: false`, state `draft`. | **Fail:** the job was not placed on hold. |
+## Regression verification and reproduction
 
-The fourth check did generate all four required files with nonzero sizes:
-`04_revised_clean_v2.docx`, `05_tracked_changes_redline_v1_to_v2.docx`,
-`03_annotated_reference.pdf`, and `06_resubmission_package.zip`. The annotated PDF
-contained one annotation and the ZIP passed its integrity check. However, the
-clean document did not contain the accepted edit, and the redline XML contained
-neither `<w:del>` nor `<w:ins>`. File existence alone did not pass the workflow.
+The complete `pytest -v` suite passed **116 tests**: all previous 89 tests plus
+27 application regression cases. These cover invalid citations, incomplete
+label coverage, provider failure, empty model responses, persistence, duplicate
+findings, active-review state, accepted edits, authentic OOXML changes, and
+reopened conflicts. The run used an isolated copy of the unchanged source to
+avoid overwriting tracked demo artifacts. One existing Starlette test-client
+deprecation warning remains.
 
-The synthetic adverse-event narrative was:
+`npm test` passed **11 tests**; `npm run check` and `npm run client:check` both
+passed. Existing Vite plugin deprecation warnings remain.
 
-> My aunt became so light-headed that she crumpled to the kitchen floor after
-> swallowing her first Aurenix tablet; paramedics took her straight to hospital.
+To repeat the unmocked check with `GEMINI_API_KEY` supplied securely:
 
-`screen_pharmacovigilance_cv08` discards the model return value and bases `flagged`
-on its existing marker/regex checks. `import_and_reconcile_comments` also
-discards the model response, submits only a comment count/job ID, and escalates
-overlapping comments without respecting the subsequent accepted/rejected
-decisions. `analyze_approval_day_label_delta` sends only indication/scenario-count
-information and discards the response. These are existing decision-wiring
-defects; they were recorded without changing clinical decision rules.
+```bash
+.venv/bin/python evals/live_red_team.py --bootstrap-probe
+```
 
-## Bootstrap-secret protection and regression tests
+The script uses a temporary SQLite database and a random local port, creates
+synthetic input files, and exits unsuccessfully if any endpoint, provider call,
+citation, artifact, or red-team assertion fails. Reports default to a temporary
+`run-*` directory; set `MLR_LIVE_REPORT_DIR` to choose another report parent.
+Generated job artifacts remain in the ignored `artifacts/file_roundtrip` tree.
 
-`POST /auth/token` now reads `MLR_GENIE_BOOTSTRAP_SECRET` for each request and
-requires the matching `X-MLR-Bootstrap-Secret` header when the variable has a
-nonempty value. A real HTTP check with an isolated, temporary process secret
-confirmed missing header → 401, incorrect header → 403, correct header → 200
-and successful use of the resulting signed token in the live workflow.
-The configured environment's bootstrap secret remains unset; set it securely
-to enable this protection in a hosted deployment.
+[The sanitized JSON evidence](live-verification-2026-10-30.json) contains all 19
+router receipts, persisted job receipts, endpoint statuses, selected structured
+assessments, and SHA-256 hashes of the exact backend files verified. The base
+commit is `1fae0cc`; the hashes identify the application changes tested before
+this report was committed. No credentials or signed session tokens are included.
 
-The full offline `pytest -v` regression run passed **89 tests**. This includes
-the existing checks plus bootstrap-secret tests, updated SDK model expectations,
-actual-model telemetry checks, and cached-request configuration/retry checks.
-Those regression results are separate from the live red-team failures above.
-
-See [the sanitized machine-readable evidence](live-verification-2026-10-30.json)
-for endpoint statuses, telemetry, artifact checks, and selected model responses.
+The original verification at `ec6a082` exposed unavailable 2.5 model mappings and
+a cached-request system-instruction error; those transport fixes were already
+in `1fae0cc`. This follow-up verifies that successful model responses now affect
+application behavior. These five synthetic checks establish the observed cases,
+not general clinical accuracy or provider retention guarantees.

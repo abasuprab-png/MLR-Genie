@@ -1,133 +1,645 @@
 {
-  "baseline_commit": "ec6a082ab5d74260adccd15c223dc2e2c064159e",
-  "run_id": "run-4687cd9a31",
-  "synthetic_data_only": true,
-  "mocked_live_calls": false,
-  "generation_calls": 13,
-  "provider_errors": [],
-  "valid_claim_verdicts": 6,
-  "bootstrap_gate": {
-    "missing_header": 401,
-    "wrong_header": 403,
-    "valid_header": 200,
-    "secret_scope": "isolated verification process"
+  "verified_date": "2026-10-30",
+  "base_commit": "1fae0cc497f14b2b12a94e6281fe0aeb47e392ab",
+  "run_id": "run-a8c4a0ad76",
+  "method": "Real local HTTP against Uvicorn; unmocked google.genai SDK; synthetic documents and identities.",
+  "client_type": "google.genai.client.Client",
+  "source_sha256": {
+    "backend/__init__.py": "1044ee2f109dfffe8f2d254724a6aee6ae2a676e74284270c7d8cb1a7539c478",
+    "backend/agent/__init__.py": "5d015742b9df420a8b8d440da761c50e216936debb3d29c6e682dcf0658d7490",
+    "backend/agent/gemini_gateway.py": "213c61d875e295c38d887c4e3abddf5d1833a124093dad77a40dd027f67d7a6f",
+    "backend/agent/mlr_genie_agent.py": "6fe64be0af4ef015e34998cda070b7c6868df4e08d87a6174b8c56dd632e35c9",
+    "backend/agent/models_router.py": "ff929b77fbe2b03830ad0439bb60baf1061b2d8971f8d957b25edebe0adf1fcd",
+    "backend/config.py": "4663f5a382a33a85f1d3eef3ed16614c0ae7bd9878c9013b1227f1b6709ab460",
+    "backend/document_engine.py": "91f1cfeb65b30156924d8ba5217d9be22c887867926bb967b71afb7bddae38a5",
+    "backend/domain/__init__.py": "c1e14862e5721fb64e74f1af8a444de1eba8ebc605ca6ff34a9f446d9a14a2f7",
+    "backend/domain/assessments.py": "0203596adb37a3872142611f03ed3db9aa6ea7890c250a520f508457d76901fd",
+    "backend/domain/schemas.py": "2977f76ea9604144cb48246ef175537954eff0d78fcd8a1b27ec78d3595dc2b9",
+    "backend/main.py": "07964f19fe91fe1fc45936b783287dd5ce52be319d2edb168f0020c2e12d6fdb",
+    "backend/storage.py": "b978c347b0c1c55dd8dae47ef7c756a35a5a0aa444a0d2280668a57f0030921e",
+    "backend/tools/__init__.py": "9f56b5992177bade17203ae0059573a1dd275768102650321e1c91ee595118a2",
+    "backend/tools/document_tools.py": "3a2c5b5c6a9bb096a19636191dd3f0b70ae3de2579760ef922792c2f1431b619",
+    "backend/tools/platform_adapters.py": "b81ccaaa1644ea27ebe14c0c018626734a9a7be34cb7409aa01cd64ee51c3dcd",
+    "backend/tools/review_tools.py": "6fa4c398cbcab9548e2842f8ac1d7b734124bf33c58df96942be75314b7994a1"
   },
-  "call_groups": [
-    {
-      "task": "cv08_pv_gate",
-      "effective_model": "gemini-3.5-flash-lite",
-      "transport": "generate_content",
-      "used_live_sdk": true,
-      "count": 4
-    },
-    {
-      "task": "claim_verification",
-      "effective_model": "gemini-3.1-pro-preview",
-      "transport": "generate_content",
-      "used_live_sdk": true,
-      "count": 6
-    },
-    {
-      "task": "comment_reconciliation",
-      "effective_model": "gemini-3.1-pro-preview",
-      "transport": "generate_content",
-      "used_live_sdk": true,
-      "count": 2
-    },
-    {
-      "task": "approval_day_label_delta",
-      "effective_model": "gemini-3.1-pro-preview",
-      "transport": "generate_content",
-      "used_live_sdk": true,
-      "count": 1
-    }
-  ],
-  "telemetry_receipts": [
-    {
-      "claim_id": "clm_job_live_4687cd9a31_1",
-      "used_live_sdk": true,
-      "effective_model": "gemini-3.1-pro-preview",
-      "transport": "generate_content",
-      "cached_content": "cachedContents/y9fa2e1xgpaechezom52rynvo28zdo43eq5ggpr6"
-    }
-  ],
-  "cache": {
-    "model": "gemini-4-argon",
-    "effective_model": "gemini-3.1-pro-preview",
-    "used_live_sdk": true
+  "outcomes": {
+    "supported_pdf_claim": true,
+    "population_shift": true,
+    "live_label_delta": true,
+    "human_resolution_and_redline": true,
+    "paraphrased_adverse_event": true
   },
+  "initial_review_state": "in_review",
   "endpoint_statuses": [
     {
       "step": "token",
-      "status": 200
+      "status_code": 200
     },
     {
-      "step": "intake:job_live_4687cd9a31",
-      "status": 200
+      "step": "intake:job_live_a8c4a0ad76",
+      "status_code": 200
     },
     {
       "step": "upload-docx",
-      "status": 200
+      "status_code": 200
     },
     {
       "step": "upload-pdf",
-      "status": 200
+      "status_code": 200
     },
     {
       "step": "conflicting-comments",
-      "status": 200
+      "status_code": 200
     },
     {
       "step": "diff-label",
-      "status": 200
+      "status_code": 200
     },
     {
       "step": "accept-one-edit",
-      "status": 200
+      "status_code": 200
     },
     {
       "step": "roundtrip",
-      "status": 200
+      "status_code": 200
     },
     {
-      "step": "intake:job_live_4687cd9a31_shift",
-      "status": 200
+      "step": "intake:job_live_a8c4a0ad76_shift",
+      "status_code": 200
     },
     {
-      "step": "intake:job_live_4687cd9a31_pv",
-      "status": 200
+      "step": "shift-upload-pdf",
+      "status_code": 200
+    },
+    {
+      "step": "intake:job_live_a8c4a0ad76_pv",
+      "status_code": 200
     }
   ],
+  "bootstrap_gate": {
+    "missing_header": 401,
+    "wrong_header": 403
+  },
+  "provider_errors": [],
+  "valid_claim_verdicts": 12,
+  "router_telemetry_log": [
+    {
+      "model": "gemini-3.5-flash-lite",
+      "effective_model": "gemini-3.5-flash-lite",
+      "task_type": "cv08_pv_gate",
+      "service_tier": "standard",
+      "used_live_sdk": true,
+      "transport_mode": "generate_content",
+      "cached_content": null,
+      "previous_interaction_id": null,
+      "interaction_id": "int_85bc00757d92"
+    },
+    {
+      "model": "gemini-4-argon",
+      "effective_model": "gemini-3.1-pro-preview",
+      "task_type": "claim_verification",
+      "service_tier": "standard",
+      "used_live_sdk": true,
+      "transport_mode": "generate_content",
+      "cached_content": null,
+      "previous_interaction_id": null,
+      "interaction_id": "int_44dd7ecbf6f1"
+    },
+    {
+      "model": "gemini-4-argon",
+      "effective_model": "gemini-3.1-pro-preview",
+      "task_type": "claim_verification",
+      "service_tier": "standard",
+      "used_live_sdk": true,
+      "transport_mode": "generate_content",
+      "cached_content": null,
+      "previous_interaction_id": null,
+      "interaction_id": "int_b77b66a36765"
+    },
+    {
+      "model": "gemini-3.5-flash-lite",
+      "effective_model": "gemini-3.5-flash-lite",
+      "task_type": "cv08_pv_gate",
+      "service_tier": "standard",
+      "used_live_sdk": true,
+      "transport_mode": "generate_content",
+      "cached_content": null,
+      "previous_interaction_id": null,
+      "interaction_id": "int_85bc00757d92"
+    },
+    {
+      "model": "gemini-4-argon",
+      "effective_model": "gemini-3.1-pro-preview",
+      "task_type": "claim_verification",
+      "service_tier": "standard",
+      "used_live_sdk": true,
+      "transport_mode": "generate_content",
+      "cached_content": null,
+      "previous_interaction_id": null,
+      "interaction_id": "int_44dd7ecbf6f1"
+    },
+    {
+      "model": "gemini-4-argon",
+      "effective_model": "gemini-3.1-pro-preview",
+      "task_type": "claim_verification",
+      "service_tier": "standard",
+      "used_live_sdk": true,
+      "transport_mode": "generate_content",
+      "cached_content": null,
+      "previous_interaction_id": null,
+      "interaction_id": "int_b77b66a36765"
+    },
+    {
+      "model": "gemini-4-argon",
+      "effective_model": "gemini-3.1-pro-preview",
+      "task_type": "claim_verification",
+      "service_tier": "standard",
+      "used_live_sdk": true,
+      "transport_mode": "generate_content",
+      "cached_content": "cachedContents/6ra3ih2u2dqt1781acf4vyobqa4pygoqatiul06t",
+      "previous_interaction_id": null,
+      "interaction_id": "int_44dd7ecbf6f1"
+    },
+    {
+      "model": "gemini-4-argon",
+      "effective_model": "gemini-3.1-pro-preview",
+      "task_type": "claim_verification",
+      "service_tier": "standard",
+      "used_live_sdk": true,
+      "transport_mode": "generate_content",
+      "cached_content": "cachedContents/6ra3ih2u2dqt1781acf4vyobqa4pygoqatiul06t",
+      "previous_interaction_id": null,
+      "interaction_id": "int_b77b66a36765"
+    },
+    {
+      "model": "gemini-4-argon",
+      "effective_model": "gemini-3.1-pro-preview",
+      "task_type": "comment_reconciliation",
+      "service_tier": "standard",
+      "used_live_sdk": true,
+      "transport_mode": "generate_content",
+      "cached_content": null,
+      "previous_interaction_id": null,
+      "interaction_id": "int_a121c3491e4f"
+    },
+    {
+      "model": "gemini-4-argon",
+      "effective_model": "gemini-3.1-pro-preview",
+      "task_type": "approval_day_label_delta",
+      "service_tier": "priority",
+      "used_live_sdk": true,
+      "transport_mode": "generate_content",
+      "cached_content": null,
+      "previous_interaction_id": null,
+      "interaction_id": "int_e4c666ab2472"
+    },
+    {
+      "model": "gemini-4-argon",
+      "effective_model": "gemini-3.1-pro-preview",
+      "task_type": "comment_reconciliation",
+      "service_tier": "standard",
+      "used_live_sdk": true,
+      "transport_mode": "generate_content",
+      "cached_content": null,
+      "previous_interaction_id": null,
+      "interaction_id": "int_42d5ca519c88"
+    },
+    {
+      "model": "gemini-4-argon",
+      "effective_model": "gemini-3.1-pro-preview",
+      "task_type": "claim_verification",
+      "service_tier": "standard",
+      "used_live_sdk": true,
+      "transport_mode": "generate_content",
+      "cached_content": "cachedContents/6ra3ih2u2dqt1781acf4vyobqa4pygoqatiul06t",
+      "previous_interaction_id": null,
+      "interaction_id": "int_5050b8ca6533"
+    },
+    {
+      "model": "gemini-4-argon",
+      "effective_model": "gemini-3.1-pro-preview",
+      "task_type": "claim_verification",
+      "service_tier": "standard",
+      "used_live_sdk": true,
+      "transport_mode": "generate_content",
+      "cached_content": "cachedContents/6ra3ih2u2dqt1781acf4vyobqa4pygoqatiul06t",
+      "previous_interaction_id": null,
+      "interaction_id": "int_5050b8ca6533"
+    },
+    {
+      "model": "gemini-3.5-flash-lite",
+      "effective_model": "gemini-3.5-flash-lite",
+      "task_type": "cv08_pv_gate",
+      "service_tier": "standard",
+      "used_live_sdk": true,
+      "transport_mode": "generate_content",
+      "cached_content": null,
+      "previous_interaction_id": null,
+      "interaction_id": "int_2d474526d7e8"
+    },
+    {
+      "model": "gemini-4-argon",
+      "effective_model": "gemini-3.1-pro-preview",
+      "task_type": "claim_verification",
+      "service_tier": "standard",
+      "used_live_sdk": true,
+      "transport_mode": "generate_content",
+      "cached_content": null,
+      "previous_interaction_id": null,
+      "interaction_id": "int_d7b5fb3b287e"
+    },
+    {
+      "model": "gemini-4-argon",
+      "effective_model": "gemini-3.1-pro-preview",
+      "task_type": "claim_verification",
+      "service_tier": "standard",
+      "used_live_sdk": true,
+      "transport_mode": "generate_content",
+      "cached_content": null,
+      "previous_interaction_id": null,
+      "interaction_id": "int_b77b66a36765"
+    },
+    {
+      "model": "gemini-4-argon",
+      "effective_model": "gemini-3.1-pro-preview",
+      "task_type": "claim_verification",
+      "service_tier": "standard",
+      "used_live_sdk": true,
+      "transport_mode": "generate_content",
+      "cached_content": "cachedContents/8qbbft955tcphdtud5ma2fqoymouzhj5i9x2g5b8",
+      "previous_interaction_id": null,
+      "interaction_id": "int_d7b5fb3b287e"
+    },
+    {
+      "model": "gemini-4-argon",
+      "effective_model": "gemini-3.1-pro-preview",
+      "task_type": "claim_verification",
+      "service_tier": "standard",
+      "used_live_sdk": true,
+      "transport_mode": "generate_content",
+      "cached_content": "cachedContents/8qbbft955tcphdtud5ma2fqoymouzhj5i9x2g5b8",
+      "previous_interaction_id": null,
+      "interaction_id": "int_b77b66a36765"
+    },
+    {
+      "model": "gemini-3.5-flash-lite",
+      "effective_model": "gemini-3.5-flash-lite",
+      "task_type": "cv08_pv_gate",
+      "service_tier": "standard",
+      "used_live_sdk": true,
+      "transport_mode": "generate_content",
+      "cached_content": null,
+      "previous_interaction_id": null,
+      "interaction_id": "int_e6456e80bd3d"
+    }
+  ],
+  "job_telemetry_receipts": [
+    {
+      "claim_id": "clm_job_live_a8c4a0ad76_1",
+      "effective_model": "gemini-3.1-pro-preview",
+      "transport": "generate_content",
+      "service_tier": "standard",
+      "zero_data_retention": true,
+      "zdr_attestation": "provider_request_configured",
+      "verification_mode": "live_sdk_execution",
+      "cached_content": "cachedContents/6ra3ih2u2dqt1781acf4vyobqa4pygoqatiul06t",
+      "used_live_sdk": true,
+      "interaction_id": "int_5050b8ca6533",
+      "timestamp_iso": "2026-10-30T15:34:55.358512+00:00"
+    }
+  ],
+  "job_assessment_telemetry_receipts": [
+    {
+      "model": "gemini-3.5-flash-lite",
+      "effective_model": "gemini-3.5-flash-lite",
+      "task_type": "cv08_pv_gate",
+      "service_tier": "standard",
+      "used_live_sdk": true,
+      "transport_mode": "generate_content",
+      "cached_content": null,
+      "previous_interaction_id": null,
+      "interaction_id": "int_85bc00757d92"
+    },
+    {
+      "model": "gemini-3.5-flash-lite",
+      "effective_model": "gemini-3.5-flash-lite",
+      "task_type": "cv08_pv_gate",
+      "service_tier": "standard",
+      "used_live_sdk": true,
+      "transport_mode": "generate_content",
+      "cached_content": null,
+      "previous_interaction_id": null,
+      "interaction_id": "int_85bc00757d92"
+    },
+    {
+      "model": "gemini-4-argon",
+      "effective_model": "gemini-3.1-pro-preview",
+      "task_type": "comment_reconciliation",
+      "service_tier": "standard",
+      "used_live_sdk": true,
+      "transport_mode": "generate_content",
+      "cached_content": null,
+      "previous_interaction_id": null,
+      "interaction_id": "int_a121c3491e4f"
+    },
+    {
+      "model": "gemini-4-argon",
+      "effective_model": "gemini-3.1-pro-preview",
+      "task_type": "approval_day_label_delta",
+      "service_tier": "priority",
+      "used_live_sdk": true,
+      "transport_mode": "generate_content",
+      "cached_content": null,
+      "previous_interaction_id": null,
+      "interaction_id": "int_e4c666ab2472"
+    },
+    {
+      "model": "gemini-4-argon",
+      "effective_model": "gemini-3.1-pro-preview",
+      "task_type": "comment_reconciliation",
+      "service_tier": "standard",
+      "used_live_sdk": true,
+      "transport_mode": "generate_content",
+      "cached_content": null,
+      "previous_interaction_id": null,
+      "interaction_id": "int_42d5ca519c88"
+    }
+  ],
+  "verified_pdf_box": [
+    2,
+    54.0,
+    96.0,
+    285.25,
+    137.12
+  ],
+  "artifact_validation": {
+    "clean_matches_job": true,
+    "deleted_text": "reduced the risk",
+    "inserted_text": "lowered the risk",
+    "zip_valid": true,
+    "pdf_annotated": true
+  },
   "red_team": {
     "supported_claim": {
-      "classification": "supported",
-      "pdf": {
-        "page_count": 2,
-        "box": [
-          2,
-          54.0,
-          96.0,
-          285.25,
-          137.12
-        ],
-        "inside_page": true,
-        "quote_matches": true
-      }
+      "claims": [
+        {
+          "claim_id": "clm_job_live_a8c4a0ad76_1",
+          "sentence_text": "In adults with EGFR-mutated NSCLC, Aurenix reduced the risk of disease progression or death by 38% compared with placebo.",
+          "paragraph_index": 0,
+          "support_status": "supported",
+          "entailment_classification": "supported",
+          "population": "adults with EGFR-mutated NSCLC",
+          "endpoint": "risk of disease progression or death",
+          "comparator": "placebo",
+          "direction": "reduced",
+          "magnitude": "38%",
+          "timeframe": "Not specified",
+          "locked_numbers": [
+            "38%"
+          ],
+          "numerical_mismatches": [],
+          "required_qualifiers": [],
+          "missing_qualifiers": [],
+          "paired_isi_present": true,
+          "requires_isi": true,
+          "plain_english_diagnosis": "Within Approved Meaning (Ready for MLR Review).",
+          "anchors": [
+            {
+              "page_number": 2,
+              "x0": 54.0,
+              "y0": 96.0,
+              "x1": 285.25,
+              "y1": 137.12,
+              "page_width": 612.0,
+              "page_height": 792.0,
+              "source_document_id": "LIVE-SYNTHETIC-PDF",
+              "source_version": "1",
+              "verbatim_quote": "In adults with EGFR-mutated NSCLC, Aurenix reduced the risk of disease progression or death by 38% compared with placebo.",
+              "snippet_sha256": "671d955ddbff6ea97430a3442d13abc48820a8b9b4bc549af72b9219a7e30b0d",
+              "anchor_valid": true
+            }
+          ],
+          "model_used": "gemini-4-argon",
+          "bound_version": 2,
+          "bound_revision_sha256": "4aa9acd9b4f3475c45ea1ffeb8f7d60a5ac09d1a340ce7c07eaa8c4911424b5f",
+          "stale": false
+        },
+        {
+          "claim_id": "clm_job_live_a8c4a0ad76_2",
+          "sentence_text": "Aurenix is contraindicated in patients with severe hepatic impairment.",
+          "paragraph_index": 1,
+          "support_status": "supported",
+          "entailment_classification": "supported",
+          "population": "patients with severe hepatic impairment",
+          "endpoint": "contraindicated",
+          "comparator": "unspecified",
+          "direction": "descriptive",
+          "magnitude": "Qualitative clinical statement",
+          "timeframe": "unspecified",
+          "locked_numbers": [],
+          "numerical_mismatches": [],
+          "required_qualifiers": [
+            "severe hepatic impairment"
+          ],
+          "missing_qualifiers": [],
+          "paired_isi_present": true,
+          "requires_isi": true,
+          "plain_english_diagnosis": "Within Approved Meaning (Ready for MLR Review).",
+          "anchors": [
+            {
+              "page_number": 2,
+              "x0": 318.0,
+              "y0": 96.0,
+              "x1": 551.91,
+              "y1": 123.09,
+              "page_width": 612.0,
+              "page_height": 792.0,
+              "source_document_id": "LIVE-SYNTHETIC-PDF",
+              "source_version": "1",
+              "verbatim_quote": "Important Safety Information: Aurenix is contraindicated in patients with severe hepatic impairment.",
+              "snippet_sha256": "d335409b0f82a56800f510e2c0f489dea96c80a92ea68c09ba0dd0dc8e068870",
+              "anchor_valid": true
+            }
+          ],
+          "model_used": "gemini-4-argon",
+          "bound_version": 2,
+          "bound_revision_sha256": "4aa9acd9b4f3475c45ea1ffeb8f7d60a5ac09d1a340ce7c07eaa8c4911424b5f",
+          "stale": false
+        }
+      ],
+      "telemetry_receipts": [
+        {
+          "claim_id": "clm_job_live_a8c4a0ad76_1",
+          "effective_model": "gemini-3.1-pro-preview",
+          "transport": "generate_content",
+          "service_tier": "standard",
+          "zero_data_retention": true,
+          "zdr_attestation": "provider_request_configured",
+          "verification_mode": "live_sdk_execution",
+          "cached_content": "cachedContents/6ra3ih2u2dqt1781acf4vyobqa4pygoqatiul06t",
+          "used_live_sdk": true,
+          "interaction_id": "int_44dd7ecbf6f1",
+          "timestamp_iso": "2026-10-30T15:34:04.350294+00:00"
+        },
+        {
+          "claim_id": "clm_job_live_a8c4a0ad76_2",
+          "effective_model": "gemini-3.1-pro-preview",
+          "transport": "generate_content",
+          "service_tier": "standard",
+          "zero_data_retention": true,
+          "zdr_attestation": "provider_request_configured",
+          "verification_mode": "live_sdk_execution",
+          "cached_content": "cachedContents/6ra3ih2u2dqt1781acf4vyobqa4pygoqatiul06t",
+          "used_live_sdk": true,
+          "interaction_id": "int_b77b66a36765",
+          "timestamp_iso": "2026-10-30T15:34:09.686953+00:00"
+        }
+      ],
+      "pdf_pages": 2
     },
-    "population_shift": {
-      "classification": "contradicted",
-      "pdf_backed_verification": {
-        "classification": "contradicted",
-        "receipts": [
+    "comments": {
+      "initial_reconciliation": {
+        "imported_count": 2,
+        "conflict_groups": [
           {
-            "claim_id": "clm_job_live_4687cd9a31_shift_1",
-            "used_live_sdk": true,
-            "effective_model": "gemini-3.1-pro-preview",
-            "transport": "generate_content",
-            "cached_content": "cachedContents/4a4mybz78rjv7tzdxy2ban4rpfq09a4q1av1rxq3"
+            "anchored_passage": "In adults with EGFR-mutated NSCLC, Aurenix reduced the risk of disease progression or death by 38% compared with placebo.",
+            "conflicting_comment_Ids": [
+              "medical",
+              "regulatory"
+            ],
+            "reviewers": [
+              "Synthetic Medical Reviewer (Medical)",
+              "Synthetic Regulatory Reviewer (Regulatory)"
+            ],
+            "escalation_note": "Conflicting reviewer instructions on the same or overlapping passage. Escalated to human decision-maker in Decisions Needed; Genie will not guess."
           }
         ],
-        "source_quote": "In adults with EGFR-mutated NSCLC, Aurenix reduced the risk of disease progression or death by 38% compared with placebo."
+        "requires_human_resolution": true,
+        "model_used": "gemini-4-argon",
+        "model_assessment": {
+          "conflicts": [
+            {
+              "comment_ids": [
+                "medical",
+                "regulatory"
+              ],
+              "rationale": "Comment medical proposes replacing \"reduced the risk\" with \"lowered the risk\" within the passage. Comment regulatory proposes replacing the entire passage \"In adults with EGFR-mutated NSCLC, Aurenix reduced the risk of disease progression or death by 38% compared with placebo.\" with \"The benefit statement is pending label review.\". These are incompatible because one modifies specific phrasing while the other deletes and replaces the entire statement."
+            }
+          ]
+        },
+        "used_live_sdk": true,
+        "telemetry": {
+          "model": "gemini-4-argon",
+          "effective_model": "gemini-3.1-pro-preview",
+          "task_type": "comment_reconciliation",
+          "service_tier": "standard",
+          "used_live_sdk": true,
+          "transport_mode": "generate_content",
+          "cached_content": null,
+          "previous_interaction_id": null,
+          "interaction_id": "int_a121c3491e4f"
+        }
+      },
+      "after_acceptance": {
+        "imported_count": 2,
+        "conflict_groups": [],
+        "requires_human_resolution": false,
+        "model_used": "gemini-4-argon",
+        "model_assessment": {
+          "conflicts": [
+            {
+              "comment_ids": [
+                "medical",
+                "regulatory"
+              ],
+              "rationale": "The medical reviewer requests replacing \"reduced the risk\" with \"lowered the risk\", whereas the regulatory reviewer requests replacing the entire sentence \"In adults with EGFR-mutated NSCLC, Aurenix reduced the risk of disease progression or death by 38% compared with placebo.\" with \"The benefit statement is pending label review.\" These edits are mutually exclusive because one modifies text that the other entirely deletes."
+            }
+          ]
+        },
+        "used_live_sdk": true,
+        "telemetry": {
+          "model": "gemini-4-argon",
+          "effective_model": "gemini-3.1-pro-preview",
+          "task_type": "comment_reconciliation",
+          "service_tier": "standard",
+          "used_live_sdk": true,
+          "transport_mode": "generate_content",
+          "cached_content": null,
+          "previous_interaction_id": null,
+          "interaction_id": "int_42d5ca519c88"
+        },
+        "applied_changes": {
+          "placed_comment_Ids": [
+            "medical"
+          ],
+          "unplaced_comment_Ids": []
+        }
+      },
+      "decisions_after_acceptance": [
+        {
+          "comment_id": "medical",
+          "human_decision": "accepted",
+          "placement_status": "placed"
+        },
+        {
+          "comment_id": "regulatory",
+          "human_decision": "rejected",
+          "placement_status": "pending"
+        }
+      ],
+      "artifacts": {
+        "01_working_draft_v1.docx": {
+          "filename": "01_working_draft_v1.docx",
+          "exists": true,
+          "bytes": 36721,
+          "sha256": "7c4c2f46dd9ab4cf898763e4f2e16607c7815d30d12f844f63a2109ba19b5b59",
+          "media_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+          "download_url": "/jobs/job_live_a8c4a0ad76/artifacts/01_working_draft_v1.docx"
+        },
+        "02_reference_source.pdf": {
+          "filename": "02_reference_source.pdf",
+          "exists": true,
+          "bytes": 3310,
+          "sha256": "3b4a9f98fb05983f4532864e571b16909631e3a849e73bdafd60c284a9debc31",
+          "media_type": "application/pdf",
+          "download_url": "/jobs/job_live_a8c4a0ad76/artifacts/02_reference_source.pdf"
+        },
+        "03_annotated_reference.pdf": {
+          "filename": "03_annotated_reference.pdf",
+          "exists": true,
+          "bytes": 4214,
+          "sha256": "4d3980c77036fe4e3cf0df7c5823235c2c0367ec9068648b698d2bf18eabbe95",
+          "media_type": "application/pdf",
+          "download_url": "/jobs/job_live_a8c4a0ad76/artifacts/03_annotated_reference.pdf"
+        },
+        "04_revised_clean_v2.docx": {
+          "filename": "04_revised_clean_v2.docx",
+          "exists": true,
+          "bytes": 37776,
+          "sha256": "4381b068025fb01f15966fc192e98cfa287a86d7911c9515f3ea8a1e00e91142",
+          "media_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+          "download_url": "/jobs/job_live_a8c4a0ad76/artifacts/04_revised_clean_v2.docx"
+        },
+        "05_tracked_changes_redline_v1_to_v2.docx": {
+          "filename": "05_tracked_changes_redline_v1_to_v2.docx",
+          "exists": true,
+          "bytes": 37887,
+          "sha256": "f32d393b73cd2ac1936da620d91145cab7c9f89dc34796cce3557b84db0fb691",
+          "media_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+          "download_url": "/jobs/job_live_a8c4a0ad76/artifacts/05_tracked_changes_redline_v1_to_v2.docx"
+        },
+        "06_resubmission_package.zip": {
+          "filename": "06_resubmission_package.zip",
+          "exists": true,
+          "bytes": 114109,
+          "sha256": "b8977b937bddc739c74ba62781b9a279e59062d6ce2c2301b01af6a2651e303b",
+          "media_type": "application/zip",
+          "download_url": "/jobs/job_live_a8c4a0ad76/artifacts/06_resubmission_package.zip"
+        }
+      },
+      "redline_xml": {
+        "has_w_del": true,
+        "has_w_ins": true
       }
     },
     "label_diff": {
@@ -144,98 +656,294 @@
           "channel": "Press Release",
           "impact_reasons": [
             "Section 12.1 Mechanism of Action update required: 'Aurenix is thought to reduce receptor signaling; the mechanism in humans has not been fully established.'",
-            "Section 14 update (disease progression or death): replace '38%' with '35%'"
+            "Section 14 update (disease progression or death): replace '38%' with '35%'",
+            "The asset makes a definitive claim about direct blocking, but the approved label states that it is only thought to reduce signaling and the mechanism in humans is not fully established.",
+            "The clinical figure for the reduction in risk of disease progression or death has been updated from 38% to 35% in the approved label."
           ],
-          "requires_human_reapproval": true
+          "requires_human_reapproval": true,
+          "model_impacts": [
+            {
+              "section": "section_12_1_moa",
+              "asset_id": "launch_brief",
+              "claim_quote": "Aurenix directly blocks receptor signaling.",
+              "label_quote": "Aurenix is thought to reduce receptor signaling; the mechanism in humans has not been fully established.",
+              "impact": "revise",
+              "rationale": "The asset makes a definitive claim about direct blocking, but the approved label states that it is only thought to reduce signaling and the mechanism in humans is not fully established.",
+              "proposed_wording": "Aurenix is thought to reduce receptor signaling; the mechanism in humans has not been fully established."
+            },
+            {
+              "section": "section_14_clinical_figures",
+              "asset_id": "launch_brief",
+              "claim_quote": "In adults with EGFR-mutated NSCLC, Aurenix reduced the risk of disease progression or death by 38% compared with placebo.",
+              "label_quote": "35%",
+              "impact": "revise",
+              "rationale": "The clinical figure for the reduction in risk of disease progression or death has been updated from 38% to 35% in the approved label.",
+              "proposed_wording": "In adults with EGFR-mutated NSCLC, Aurenix reduced the risk of disease progression or death by 35% compared with placebo."
+            }
+          ]
         }
       ],
       "new_review_path_required": true,
       "model_used": "gemini-4-argon",
       "service_tier": "priority",
-      "live_semantic_review": false,
-      "model_response": "It appears that the specific text for the **final indication** and the **planned scenario(s)** were left blank or did not paste correctly into your prompt. \n\nTo accurately identify out-of-scenario label changes and determine which launch kit assets will be affected, please provide the following information:\n\n1. **The Final Indication:** (The actual approved label text)\n2. **The Planned Scenario (Scenario 1):** (The assumed indication your team used to build the current launch assets)\n3. **A List of Launch Kit Assets (Optional but recommended):** (e.g., Core Visual Aid, HCP Website, Dosing Guide, Patient Brochure, Objection Handler, etc. If you don't provide this, I can provide a generalized list of commonly affected assets).\n\n**Once you provide that text, I will run an analysis to:**\n* Highlight exactly where the final indication deviates from Scenario 1 (e.g., added restrictions, line-of-therapy changes, biomarker requirements, demographic shifts).\n* Map those specific deviations to your launch kit assets to tell you exactly what needs to be updated (e.g., updating the safety profile, redesigning the dosing calculator, shifting the target audience imagery, etc.). \n\nPlease reply with the missing text, and I will generate the analysis for you!"
-    },
-    "comments": {
-      "requires_human_resolution": true,
-      "after_acceptance": [
+      "layer_one_affected_assets": [
         {
-          "comment_id": "medical",
-          "human_decision": "escalated",
-          "placement_status": "pending"
-        },
-        {
-          "comment_id": "regulatory",
-          "human_decision": "escalated",
-          "placement_status": "pending"
+          "asset_id": "launch_brief",
+          "title": "launch_brief",
+          "channel": "Press Release",
+          "impact_reasons": [
+            "Section 12.1 Mechanism of Action update required: 'Aurenix is thought to reduce receptor signaling; the mechanism in humans has not been fully established.'",
+            "Section 14 update (disease progression or death): replace '38%' with '35%'"
+          ],
+          "requires_human_reapproval": true
         }
       ],
-      "redline": {
-        "has_w_del": false,
-        "has_w_ins": false
-      },
-      "clean_contains_accepted_edit": false,
-      "artifact_files": {
-        "04_revised_clean_v2.docx": {
-          "exists": true,
-          "bytes": 37776
-        },
-        "05_tracked_changes_redline_v1_to_v2.docx": {
-          "exists": true,
-          "bytes": 37776
-        },
-        "03_annotated_reference.pdf": {
-          "exists": true,
-          "bytes": 4214
-        },
-        "06_resubmission_package.zip": {
-          "exists": true,
-          "bytes": 113849
-        }
-      },
-      "annotation_count": 1,
-      "zip": {
-        "corrupt_member": null,
-        "members": [
-          "original/working_draft.docx",
-          "original/clinical_reference_pack.pdf",
-          "revised/clean_revised.docx",
-          "revised/redline_tracked_changes.docx",
-          "references/annotated_reference_pack.pdf",
-          "review/evidence_matrix.json",
-          "review/comment_response_log.json",
-          "review/decisions_and_provenance.json",
-          "manifest.json"
+      "model_assessment": {
+        "fits_prepared_scenario": false,
+        "rationale": "The final approved label for section 12.1 does not match the 'direct_mechanism' scenario, as it states the mechanism is not fully established rather than directly blocking receptor signaling.",
+        "impacts": [
+          {
+            "section": "section_12_1_moa",
+            "asset_id": "launch_brief",
+            "claim_quote": "In adults with EGFR-mutated NSCLC, Aurenix reduced the risk of disease progression or death by 38% compared with placebo.",
+            "label_quote": "Aurenix is thought to reduce receptor signaling; the mechanism in humans has not been fully established.",
+            "impact": "none",
+            "rationale": "The claim discusses clinical efficacy endpoints, not the mechanism of action.",
+            "proposed_wording": "In adults with EGFR-mutated NSCLC, Aurenix reduced the risk of disease progression or death by 38% compared with placebo."
+          },
+          {
+            "section": "section_12_1_moa",
+            "asset_id": "launch_brief",
+            "claim_quote": "Important Safety Information: Aurenix is contraindicated in patients with severe hepatic impairment.",
+            "label_quote": "Aurenix is thought to reduce receptor signaling; the mechanism in humans has not been fully established.",
+            "impact": "none",
+            "rationale": "The claim is a safety and contraindication statement unrelated to the mechanism of action.",
+            "proposed_wording": "Important Safety Information: Aurenix is contraindicated in patients with severe hepatic impairment."
+          },
+          {
+            "section": "section_12_1_moa",
+            "asset_id": "launch_brief",
+            "claim_quote": "Aurenix directly blocks receptor signaling.",
+            "label_quote": "Aurenix is thought to reduce receptor signaling; the mechanism in humans has not been fully established.",
+            "impact": "revise",
+            "rationale": "The asset makes a definitive claim about direct blocking, but the approved label states that it is only thought to reduce signaling and the mechanism in humans is not fully established.",
+            "proposed_wording": "Aurenix is thought to reduce receptor signaling; the mechanism in humans has not been fully established."
+          },
+          {
+            "section": "section_14_clinical_figures",
+            "asset_id": "launch_brief",
+            "claim_quote": "In adults with EGFR-mutated NSCLC, Aurenix reduced the risk of disease progression or death by 38% compared with placebo.",
+            "label_quote": "35%",
+            "impact": "revise",
+            "rationale": "The clinical figure for the reduction in risk of disease progression or death has been updated from 38% to 35% in the approved label.",
+            "proposed_wording": "In adults with EGFR-mutated NSCLC, Aurenix reduced the risk of disease progression or death by 35% compared with placebo."
+          },
+          {
+            "section": "section_14_clinical_figures",
+            "asset_id": "launch_brief",
+            "claim_quote": "Important Safety Information: Aurenix is contraindicated in patients with severe hepatic impairment.",
+            "label_quote": "disease progression or death",
+            "impact": "none",
+            "rationale": "The claim describes a contraindication and is unrelated to the updated clinical efficacy figures.",
+            "proposed_wording": "Important Safety Information: Aurenix is contraindicated in patients with severe hepatic impairment."
+          },
+          {
+            "section": "section_14_clinical_figures",
+            "asset_id": "launch_brief",
+            "claim_quote": "Aurenix directly blocks receptor signaling.",
+            "label_quote": "disease progression or death",
+            "impact": "none",
+            "rationale": "The claim relates to the mechanism of action, which is unaffected by updates to section 14 clinical efficacy figures.",
+            "proposed_wording": "Aurenix directly blocks receptor signaling."
+          }
         ]
       },
-      "model_response": "Please provide the two comments you would like me to reconcile for job `job_live_4687cd9a31`. \n\nOnce you share them, I will group the feedback by topic, preserve the verbatim wording of each comment, and highlight any conflicting points so you can make the final decision."
+      "used_live_sdk": true,
+      "telemetry": {
+        "model": "gemini-4-argon",
+        "effective_model": "gemini-3.1-pro-preview",
+        "task_type": "approval_day_label_delta",
+        "service_tier": "priority",
+        "used_live_sdk": true,
+        "transport_mode": "generate_content",
+        "cached_content": null,
+        "previous_interaction_id": null,
+        "interaction_id": "int_e4c666ab2472"
+      },
+      "label_quotes_verified": true
+    },
+    "population_shift": {
+      "claims": [
+        {
+          "claim_id": "clm_job_live_a8c4a0ad76_shift_1",
+          "sentence_text": "In children with EGFR-mutated NSCLC, Aurenix reduced the risk of disease progression or death by 38% compared with placebo.",
+          "paragraph_index": 0,
+          "support_status": "contradicted",
+          "entailment_classification": "contradicted",
+          "population": "children with EGFR-mutated NSCLC",
+          "endpoint": "risk of disease progression or death",
+          "comparator": "placebo",
+          "direction": "reduced",
+          "magnitude": "38%",
+          "timeframe": "not specified",
+          "locked_numbers": [
+            "38%"
+          ],
+          "numerical_mismatches": [],
+          "required_qualifiers": [],
+          "missing_qualifiers": [],
+          "paired_isi_present": true,
+          "requires_isi": true,
+          "plain_english_diagnosis": "PICO population mismatch: Claim specifies 'children with EGFR-mutated NSCLC' but authorized source population is 'adults with EGFR-mutated NSCLC'.",
+          "anchors": [
+            {
+              "page_number": 2,
+              "x0": 54.0,
+              "y0": 96.0,
+              "x1": 285.25,
+              "y1": 137.12,
+              "page_width": 612.0,
+              "page_height": 792.0,
+              "source_document_id": "LIVE-SYNTHETIC-PDF",
+              "source_version": "1",
+              "verbatim_quote": "In adults with EGFR-mutated NSCLC, Aurenix reduced the risk of disease progression or death by 38% compared with placebo.",
+              "snippet_sha256": "671d955ddbff6ea97430a3442d13abc48820a8b9b4bc549af72b9219a7e30b0d",
+              "anchor_valid": true
+            }
+          ],
+          "model_used": "gemini-4-argon",
+          "bound_version": 1,
+          "bound_revision_sha256": "c87ebb8d63ef6bda769786eccd3838cf6a7ff5b90191a6ee21b9faa5c93b8dee",
+          "stale": false
+        },
+        {
+          "claim_id": "clm_job_live_a8c4a0ad76_shift_2",
+          "sentence_text": "Aurenix is contraindicated in patients with severe hepatic impairment.",
+          "paragraph_index": 1,
+          "support_status": "supported",
+          "entailment_classification": "supported",
+          "population": "patients with severe hepatic impairment",
+          "endpoint": "contraindication",
+          "comparator": "unspecified",
+          "direction": "contraindicated",
+          "magnitude": "Qualitative clinical statement",
+          "timeframe": "unspecified",
+          "locked_numbers": [],
+          "numerical_mismatches": [],
+          "required_qualifiers": [
+            "severe hepatic impairment"
+          ],
+          "missing_qualifiers": [],
+          "paired_isi_present": true,
+          "requires_isi": true,
+          "plain_english_diagnosis": "Within Approved Meaning (Ready for MLR Review).",
+          "anchors": [
+            {
+              "page_number": 2,
+              "x0": 318.0,
+              "y0": 96.0,
+              "x1": 551.91,
+              "y1": 123.09,
+              "page_width": 612.0,
+              "page_height": 792.0,
+              "source_document_id": "LIVE-SYNTHETIC-PDF",
+              "source_version": "1",
+              "verbatim_quote": "Important Safety Information: Aurenix is contraindicated in patients with severe hepatic impairment.",
+              "snippet_sha256": "d335409b0f82a56800f510e2c0f489dea96c80a92ea68c09ba0dd0dc8e068870",
+              "anchor_valid": true
+            }
+          ],
+          "model_used": "gemini-4-argon",
+          "bound_version": 1,
+          "bound_revision_sha256": "c87ebb8d63ef6bda769786eccd3838cf6a7ff5b90191a6ee21b9faa5c93b8dee",
+          "stale": false
+        }
+      ],
+      "telemetry_receipts": [
+        {
+          "claim_id": "clm_job_live_a8c4a0ad76_shift_1",
+          "effective_model": "gemini-3.1-pro-preview",
+          "transport": "generate_content",
+          "service_tier": "standard",
+          "zero_data_retention": true,
+          "zdr_attestation": "provider_request_configured",
+          "verification_mode": "live_sdk_execution",
+          "cached_content": "cachedContents/8qbbft955tcphdtud5ma2fqoymouzhj5i9x2g5b8",
+          "used_live_sdk": true,
+          "interaction_id": "int_d7b5fb3b287e",
+          "timestamp_iso": "2026-10-30T15:35:14.501498+00:00"
+        },
+        {
+          "claim_id": "clm_job_live_a8c4a0ad76_shift_2",
+          "effective_model": "gemini-3.1-pro-preview",
+          "transport": "generate_content",
+          "service_tier": "standard",
+          "zero_data_retention": true,
+          "zdr_attestation": "provider_request_configured",
+          "verification_mode": "live_sdk_execution",
+          "cached_content": "cachedContents/8qbbft955tcphdtud5ma2fqoymouzhj5i9x2g5b8",
+          "used_live_sdk": true,
+          "interaction_id": "int_b77b66a36765",
+          "timestamp_iso": "2026-10-30T15:35:20.233865+00:00"
+        }
+      ]
     },
     "paraphrased_adverse_event": {
       "screening": {
-        "cv08_flagged": false,
-        "routing_note": null,
-        "model_used": "gemini-3.5-flash-lite"
+        "cv08_flagged": true,
+        "routing_note": "Regulatory Stop (CV-08): Individual patient adverse event detected. Do not use as communications copy; route immediately to Pharmacovigilance within 24 hours.",
+        "model_used": "gemini-3.5-flash-lite",
+        "assessment": {
+          "claims": [
+            {
+              "span": "My aunt became so light-headed that she crumpled to the kitchen floor after swallowing her first Aurenix tablet; paramedics took her straight to hospital.",
+              "rationale": "Assertion of an adverse event following product exposure."
+            }
+          ],
+          "safety_findings": [
+            {
+              "kind": "individual_adverse_event",
+              "span": "My aunt became so light-headed that she crumpled to the kitchen floor after swallowing her first Aurenix tablet; paramedics took her straight to hospital.",
+              "rationale": "Narrative describing a specific individual experiencing adverse symptoms after taking a product.",
+              "patient_span": "My aunt",
+              "product_span": "Aurenix tablet",
+              "event_span": "light-headed that she crumpled to the kitchen floor"
+            }
+          ]
+        },
+        "telemetry": {
+          "model": "gemini-3.5-flash-lite",
+          "effective_model": "gemini-3.5-flash-lite",
+          "task_type": "cv08_pv_gate",
+          "service_tier": "standard",
+          "used_live_sdk": true,
+          "transport_mode": "generate_content",
+          "cached_content": null,
+          "previous_interaction_id": null,
+          "interaction_id": "int_e6456e80bd3d"
+        },
+        "used_live_sdk": true
       },
-      "state": "draft",
-      "model_response": "Based on the intake text provided, here is the adverse event (AE) screening and triage assessment according to standard pharmacovigilance (ICSR) guidelines:\n\n### **Case Summary (CV-08 Intake)**\n*   **Patient:** Aunt (Adult, exact age/gender not provided)\n*   **Suspect Product:** Aurenix (tablet)\n*   **Event:** Light-headedness / Syncope (\"crumpled to the kitchen floor\") leading to hospitalization.\n\n---\n\n### **ICSR Validity Criteria (The 4 Core Elements)**\nTo determine if this intake constitutes a valid Individual Case Safety Report (ICSR) for regulatory reporting, it is checked against the four minimum criteria:\n\n1.  **Identifiable Reporter:** **No** (The reporter is the patient's niece/nephew; contact details for the reporter are currently missing from the text).\n2.  **Identifiable Patient:** **No** (Described only as \"my aunt\"; initials, age, or date of birth are missing).\n3.  **Suspect Product:** **Yes** (Aurenix tablet).\n4.  **Suspect Adverse Event:** **Yes** (Severe light-headedness / syncopal episode resulting in a fall and hospitalization).\n\n*Verdict:* **Currently an invalid ICSR** due to missing identifiable patient and reporter information. Follow-up is required to gather these details.\n\n---\n\n### **CIOMS / Data Extraction Fields**\n\n*   **Patient Information:**\n    *   Age/DOB: Unknown (Adult female)\n    *   Gender: Female (\"aunt\")\n*   **Event Information:**\n    *   Preferred Term (MedDRA equivalent): Syncope / Dizziness / Presyncope / Fall\n    *   Description: Severe light-headedness immediately following ingestion, leading to a fall (\"crumpled to the kitchen floor\").\n*   **Product Information:**\n    *   Drug Name: Aurenix\n    *   Indication: Unknown\n    *   Dose/Route/Frequency: \"First ... tablet\" (Oral, single dose assumed)\n    *   Therapy Dates: Start date: Same day as event.\n*   **Seriousness Criteria:** \n    *   **Serious:** **Yes**\n    *   *Justification:* Results in **hospitalization** (\"paramedics took her straight to hospital\") and is considered medically significant due to the loss of consciousness/fall.\n*   **Causality (Naranjo / Company Assessment):** \n    *   Temporal relationship is strong (occurred after swallowing the first tablet). Requires review by a drug safety physician.\n\n---\n\n### **Recommended Next Steps (Action Items)**\n\n1.  **Flag as Serious:** Process with expedited priority due to hospitalization.\n2.  **Information Gathering (Follow-up):**\n    *   Contact the reporter to obtain the patient's full name/initials, age, and medical history.\n    *   Obtain the reporter's name and contact information to satisfy regulatory validity.\n    *   Confirm the indication for Aurenix, batch/lot number, and concurrent medications.\n    *   Request hospital discharge summaries or medical records confirming the diagnosis and course of treatment.\n3.  **Regulatory Submission:** Once minimum criteria (identifiable patient + identifiable reporter + suspect product + adverse event) are verified via follow-up, submit the expedited safety report to the relevant health authority (e.g., FDA, EMA) within the mandatory timeframe (typically 15 calendar days for serious/unexpected events)."
+      "state": "hold",
+      "safety_findings": [
+        {
+          "kind": "individual_adverse_event",
+          "span": "My aunt became so light-headed that she crumpled to the kitchen floor after swallowing her first Aurenix tablet; paramedics took her straight to hospital.",
+          "rationale": "Narrative describing a specific individual experiencing adverse symptoms after taking a product.",
+          "patient_span": "My aunt",
+          "product_span": "Aurenix tablet",
+          "event_span": "light-headed that she crumpled to the kitchen floor",
+          "start": 0,
+          "end": 154,
+          "source_sha256": "81dde7d39fcc77f22d3fd37c1fa35146fb9cba33db75a86470d7ba07c66f2f63",
+          "used_live_sdk": true
+        }
+      ]
     }
   },
-  "as_is": {
-    "commit": "ec6a082ab5d74260adccd15c223dc2e2c064159e",
-    "working_tree_clean": true,
-    "generation_calls": 9,
-    "successful_live_calls": 0,
-    "errors": [
-      "404 NOT_FOUND. {'error': {'code': 404, 'message': 'This model models/gemini-2.5-flash-lite is no longer available to new users. Please update your code to use models/gemini-3.5-flash-lite for the latest features and improvements. We recommend you to use the Interactions API (https://ai.google.dev/gemini-api/docs/get-started).', 'status': 'NOT_FOUND'}}",
-      "404 NOT_FOUND. {'error': {'code': 404, 'message': 'This model models/gemini-2.5-pro is no longer available to new users. Please update your code to use models/gemini-3.1-pro-preview for the latest features and improvements. We recommend you to use the Interactions API (https://ai.google.dev/gemini-api/docs/get-started).', 'status': 'NOT_FOUND'}}"
-    ]
-  },
-  "supplemental_generation_calls": 1,
-  "total_verified_live_generation_calls": 14,
-  "regression_tests": {
-    "command": "python -m pytest tests/ evals/ -v",
-    "passed": 89,
-    "failed": 0,
-    "warnings": 1,
-    "live_credentials_disabled_for_regressions": true
+  "regressions": {
+    "python_passed": 116,
+    "frontend_passed": 11,
+    "typescript_checks_passed": true
   }
 }

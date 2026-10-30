@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Literal
 from pydantic import BaseModel, Field, model_validator
+from backend.domain.assessments import VerifiedSafetyFinding
 
 
 class SectorType(str, Enum):
@@ -442,6 +443,7 @@ class JobRecord(BaseModel):
     advisory_findings: list[AdvisoryFinding] = Field(default_factory=list)
     receipts: list[ConnectorReceipt] = Field(default_factory=list)
     pv_icrs_flagged: bool = False
+    safety_findings: list[VerifiedSafetyFinding] = Field(default_factory=list)
     pv_routing_note: str | None = None
     approved_handoff_bundle_uri: str | None = None
 

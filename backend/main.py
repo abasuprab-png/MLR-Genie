@@ -5,11 +5,12 @@ from pathlib import Path
 from typing import Any
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 
 from backend.agent.mlr_genie_agent import MlrGenieAgent
 from backend.agent.models_router import GeminiModelRouter
+from backend.agent.gemini_gateway import ModelAssessmentError
 from backend.config import GcpAgentConfig
 from backend.document_engine import (
     build_resubmission_package_zip,
@@ -54,6 +55,11 @@ app = FastAPI(
     title="MLR Genie — Google Cloud, Gemini & ADK Backend",
     version="3.4.0",
 )
+
+
+@app.exception_handler(ModelAssessmentError)
+async def model_assessment_error_handler(request: Request, exc: ModelAssessmentError) -> JSONResponse:
+    return JSONResponse(status_code=502, content={"detail": str(exc), "assessment_failed": True})
 
 app.add_middleware(
     CORSMiddleware,
@@ -134,6 +140,7 @@ class ApprovalDayLabelDeltaRequest(BaseModel):
     prepared_scenarios: list[dict[str, Any]] = Field(default_factory=list)
     final_approved_label: dict[str, Any]
     launch_kit_assets: list[dict[str, Any]] = Field(default_factory=list)
+    require_live: bool = False
 
 
 def _job_artifact_dir(job_id: str) -> Path:
@@ -521,8 +528,10 @@ def diff_approval_day_label_endpoint(
         final_approved_label=body.final_approved_label,
         launch_kit_assets=assets,
         router=router,
+        require_live=body.require_live,
     )
     job.metadata["last_approval_day_label_delta"] = delta
+    job.metadata.setdefault("assessment_telemetry_receipts", []).append(delta["telemetry"])
     JOBS_DB.save_job(job)
     return {
         "job_id": job.job_id,
@@ -548,6 +557,9 @@ def reconcile_job_comments(
         raise HTTPException(status_code=403, detail=str(exc)) from exc
 
     try:
+        for comment in comments:
+            if comment.human_decision in ("accepted", "rejected"):
+                comment.human_actor = actor
         res = genie.invoke_tool(
             "import_and_reconcile_comments",
             job=job,
