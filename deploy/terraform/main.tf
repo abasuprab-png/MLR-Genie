@@ -168,9 +168,10 @@ resource "google_secret_manager_secret_iam_member" "veeva_runtime_access" {
 
 # 4. Cloud Run Service for MLR Genie ADK Orchestrator & 4-Area Web Application
 resource "google_cloud_run_v2_service" "mlr_genie_service" {
-  name     = "mlr-genie-adk-app"
-  location = var.region
-  ingress  = "INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER"
+  name                 = "mlr-genie-adk-app"
+  location             = var.region
+  ingress              = "INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER"
+  invoker_iam_disabled = true
   depends_on = [
     google_secret_manager_secret_iam_member.auth_runtime_access,
     google_secret_manager_secret_iam_member.veeva_runtime_access,

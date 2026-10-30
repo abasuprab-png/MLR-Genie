@@ -32,16 +32,9 @@ resource "google_compute_region_network_endpoint_group" "mlr_genie_serverless" {
   }
 }
 
-# The LB forwards the application's MLR bearer token, not a Google identity
-# token. Ingress restricts network reachability; hosted application auth still
-# gates protected routes. Do not change ingress to ALL with this IAM grant.
-resource "google_cloud_run_v2_service_iam_member" "https_invoker" {
-  project  = var.project_id
-  location = google_cloud_run_v2_service.mlr_genie_service.location
-  name     = google_cloud_run_v2_service.mlr_genie_service.name
-  role     = "roles/run.invoker"
-  member   = "allUsers"
-}
+# Cloud Run's service-scoped invoker_iam_disabled setting lets the LB forward
+# application bearer tokens without an allUsers IAM grant. Restricted ingress
+# and hosted application authentication remain mandatory.
 
 resource "google_compute_security_policy" "mlr_genie_https" {
   name        = "mlr-genie-https"
@@ -129,7 +122,6 @@ resource "google_compute_global_forwarding_rule" "mlr_genie_https" {
   port_range            = "443"
   load_balancing_scheme = "EXTERNAL_MANAGED"
   target                = google_compute_target_https_proxy.mlr_genie_https.id
-  depends_on            = [google_cloud_run_v2_service_iam_member.https_invoker]
 }
 
 output "public_url" {

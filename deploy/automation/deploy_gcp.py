@@ -530,6 +530,52 @@ class Deployment:
         self.flush()
         print("External DNS: create the reported A record with proxy disabled; waiting for DNS and certificate.", flush=True)
 
+    def verify_cloud_run_access(self) -> None:
+        """Prove service-scoped invocation still rejects direct Internet access."""
+        import httpx
+        service = self.cloud_json("run", "services", "describe", "mlr-genie-adk-app",
+                                  "--region=" + self.target.region)
+        annotations = service.get("metadata", {}).get("annotations", {})
+        if annotations.get("run.googleapis.com/ingress") != "internal-and-cloud-load-balancing":
+            raise DeploymentError("Cloud Run must retain internal-and-cloud-load-balancing ingress.")
+        if annotations.get("run.googleapis.com/invoker-iam-disabled") != "true":
+            raise DeploymentError("Cloud Run service-scoped invoker IAM setting was not applied.")
+        url = service.get("status", {}).get("url", "")
+        try:
+            parsed = urlsplit(url)
+            valid_url = (
+                parsed.scheme == "https" and parsed.hostname is not None
+                and HOST_RE.fullmatch(parsed.hostname) and parsed.hostname.endswith(".run.app")
+                and parsed.port in (None, 443)
+                and parsed.username is None and parsed.password is None
+                and parsed.netloc in (parsed.hostname, parsed.hostname + ":443")
+                and parsed.path in ("", "/") and "?" not in url and "#" not in url
+                and url in ("https://" + parsed.netloc, "https://" + parsed.netloc + "/")
+            )
+        except (TypeError, ValueError):
+            valid_url = False
+        if not valid_url:
+            raise DeploymentError("Cloud Run did not return a valid HTTPS run.app service URL.")
+        health_url = url.rstrip("/") + "/health"
+        try:
+            with httpx.Client(timeout=25, follow_redirects=False, verify=True) as client:
+                status = client.get(health_url).status_code
+        except httpx.HTTPError:
+            raise DeploymentError("Could not verify direct Cloud Run ingress rejection.") from None
+        self.report["cloud_run_access"] = {
+            "ingress": annotations["run.googleapis.com/ingress"],
+            "invoker_iam_disabled": True, "direct_health_url": health_url,
+            "direct_health_status": status,
+        }
+        self.flush()
+        if status not in (403, 404):
+            raise DeploymentError(f"Direct Cloud Run /health must be blocked; received HTTP {status}.")
+        self.report["checks"].update({
+            "cloud_run_ingress_restricted": True, "cloud_run_invoker_iam_disabled": True,
+            "direct_cloud_run_health_status": status, "direct_cloud_run_ingress_blocked": True,
+        })
+        self.flush()
+
     def wait_until_ready(self) -> None:
         import httpx
         deadline = time.monotonic() + self.readiness_timeout
@@ -694,6 +740,8 @@ class Deployment:
                 with self.phase("apply complete guarded production Terraform plan"):
                     self.plan_apply("production", workspace, variables)
                     self.publish_ip()
+                with self.phase("verify restricted Cloud Run ingress and service-scoped invocation"):
+                    self.verify_cloud_run_access()
                 with self.phase("wait for managed certificate and protected public HTTPS endpoint"):
                     self.wait_until_ready()
                 bootstrap = self.read_bootstrap_secret()

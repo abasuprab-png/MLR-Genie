@@ -589,6 +589,109 @@ def test_every_public_ip_publication_also_publishes_commit_status(tmp_path, monk
     assert json.loads((tmp_path / "evidence/report.json").read_text())["public_ip_status"]["state"] == "pending"
 
 
+def cloud_run_access_deployment(tmp_path, *, annotations=None, url="https://mlr-genie-abc-uc.a.run.app"):
+    def handler(args, kwargs):
+        assert args[:5] == ["gcloud", "run", "services", "describe", "mlr-genie-adk-app"]
+        assert "--region=us-central1" in args and "--project=commsrx-ai" in args
+        return completed(args, data={"metadata": {"annotations": annotations if annotations is not None else {
+            "run.googleapis.com/ingress": "internal-and-cloud-load-balancing",
+            "run.googleapis.com/invoker-iam-disabled": "true",
+        }}, "status": {"url": url}})
+    return deployment(tmp_path, FakeRunner(handler))
+
+
+def mock_direct_cloud_run_client(monkeypatch, status=404, error=None):
+    import httpx
+    calls, settings = [], []
+    class FakeClient:
+        def __init__(self, **kwargs):
+            settings.append(kwargs)
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            return False
+        def get(self, url, **kwargs):
+            calls.append((url, kwargs))
+            if error:
+                raise error
+            return PrivateStatusResponse(status)
+    monkeypatch.setattr(httpx, "Client", FakeClient)
+    return settings, calls
+
+
+@pytest.mark.parametrize("status", [403, 404])
+def test_cloud_run_service_settings_and_direct_ingress_block_are_verified(tmp_path, monkeypatch, status):
+    current = cloud_run_access_deployment(tmp_path)
+    settings, calls = mock_direct_cloud_run_client(monkeypatch, status)
+    current.verify_cloud_run_access()
+    assert settings == [{"timeout": 25, "follow_redirects": False, "verify": True}]
+    assert calls == [("https://mlr-genie-abc-uc.a.run.app/health", {})]
+    report = json.loads((tmp_path / "evidence/report.json").read_text())
+    assert report["checks"]["direct_cloud_run_ingress_blocked"] is True
+    assert report["checks"]["direct_cloud_run_health_status"] == status
+    assert report["cloud_run_access"]["invoker_iam_disabled"] is True
+
+
+@pytest.mark.parametrize("url", [
+    "https://mlr-genie-adk-app-333570013714.us-central1.run.app:443",
+    "https://mlr-genie-abc-uc.a.run.app/",
+])
+def test_cloud_run_probe_accepts_both_service_url_formats_and_default_https_port(tmp_path, monkeypatch, url):
+    current = cloud_run_access_deployment(tmp_path, url=url)
+    settings, calls = mock_direct_cloud_run_client(monkeypatch)
+    current.verify_cloud_run_access()
+    assert calls == [(url.rstrip("/") + "/health", {})]
+
+
+@pytest.mark.parametrize("status", [200, 301, 302, 401, 500])
+def test_direct_cloud_run_success_redirect_or_unexpected_error_is_not_accepted(tmp_path, monkeypatch, status):
+    current = cloud_run_access_deployment(tmp_path)
+    mock_direct_cloud_run_client(monkeypatch, status)
+    with pytest.raises(_driver.DeploymentError, match="must be blocked"):
+        current.verify_cloud_run_access()
+    report = json.loads((tmp_path / "evidence/report.json").read_text())
+    assert report["cloud_run_access"]["direct_health_status"] == status
+    assert "direct_cloud_run_ingress_blocked" not in report["checks"]
+
+
+@pytest.mark.parametrize("annotations", [
+    {}, {"run.googleapis.com/ingress": "all", "run.googleapis.com/invoker-iam-disabled": "true"},
+    {"run.googleapis.com/ingress": "internal-and-cloud-load-balancing"},
+    {"run.googleapis.com/ingress": "internal-and-cloud-load-balancing", "run.googleapis.com/invoker-iam-disabled": "false"},
+])
+def test_wrong_cloud_run_ingress_or_invoker_settings_fail_before_http(tmp_path, monkeypatch, annotations):
+    current = cloud_run_access_deployment(tmp_path, annotations=annotations)
+    settings, calls = mock_direct_cloud_run_client(monkeypatch)
+    with pytest.raises(_driver.DeploymentError):
+        current.verify_cloud_run_access()
+    assert not settings and not calls
+
+
+@pytest.mark.parametrize("url", [
+    "http://service.run.app", "https://service.run.app:8443", "https://service.run.app:invalid",
+    "https://user@service.run.app", "https://user:password@service.run.app", "https://@service.run.app",
+    "https://service.run.app?x=1", "https://service.run.app?", "https://service.run.app#fragment",
+    "https://service.run.app/other", "https://service.run.app.attacker.example", "https://run.app",
+    "https://service.run.app ", "https://service.run.app:", "https://service.\nrun.app", "", None,
+])
+def test_cloud_run_probe_rejects_untrusted_or_noncanonical_service_urls(tmp_path, monkeypatch, url):
+    current = cloud_run_access_deployment(tmp_path, url=url)
+    settings, calls = mock_direct_cloud_run_client(monkeypatch)
+    with pytest.raises(_driver.DeploymentError, match="valid HTTPS run.app"):
+        current.verify_cloud_run_access()
+    assert not settings and not calls
+
+
+def test_direct_cloud_run_network_error_cannot_count_as_ingress_rejection(tmp_path, monkeypatch):
+    import httpx
+    current = cloud_run_access_deployment(tmp_path)
+    mock_direct_cloud_run_client(monkeypatch, error=httpx.ConnectError("private network diagnostic"))
+    with pytest.raises(_driver.DeploymentError, match="Could not verify") as error:
+        current.verify_cloud_run_access()
+    assert "private network diagnostic" not in str(error.value)
+    assert "direct_cloud_run_ingress_blocked" not in current.report["checks"]
+
+
 @pytest.mark.parametrize("commit,state", [("not-a-sha", "pending"), ("e" * 40, "error")])
 def test_public_ip_status_rejects_invalid_commit_or_state_before_network(tmp_path, monkeypatch, commit, state):
     current = public_ip_deployment(tmp_path, monkeypatch)
