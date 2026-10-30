@@ -42,7 +42,9 @@ class GeminiGateway:
             fallback_payload=None if self.require_live else offline.model_dump(),
         )
         if self.require_live and not telemetry.used_live_sdk:
-            raise ModelAssessmentError(f"{task_type}: live Gemini assessment required but unavailable.")
+            status = payload.get("provider_http_status") if isinstance(payload, dict) else None
+            diagnostic = f" (provider HTTP {status})" if type(status) is int and 100 <= status <= 599 else ""
+            raise ModelAssessmentError(f"{task_type}: live Gemini assessment required but unavailable.{diagnostic}")
         try:
             return schema.model_validate(payload), telemetry
         except (ValidationError, TypeError, ValueError) as exc:

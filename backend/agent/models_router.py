@@ -99,6 +99,27 @@ class GeminiModelRouter:
         """Returns a copy of the calibrated clinical/regulatory safety settings."""
         return [dict(item) for item in self.safety_settings]
 
+    def get_interactions_safety_settings(self) -> list[dict[str, str]]:
+        """Encode the same thresholds using the Interactions API's typed schema."""
+        return [
+            {
+                "type": item["category"].removeprefix("HARM_CATEGORY_").lower(),
+                "threshold": item["threshold"].lower(),
+            }
+            for item in self.get_clinical_safety_settings()
+        ]
+
+    @staticmethod
+    def _provider_http_status(exc: Exception) -> int | None:
+        for value in (
+            getattr(exc, "code", None),
+            getattr(exc, "status_code", None),
+            getattr(getattr(exc, "response", None), "status_code", None),
+        ):
+            if type(value) is int and 100 <= value <= 599:
+                return value
+        return None
+
     @staticmethod
     def _normalize_cache_contents(pdf_or_text_content: Any) -> list[Any]:
         """
@@ -337,7 +358,7 @@ class GeminiModelRouter:
                         "system_instruction": system_instruction,
                         "service_tier": service_tier,
                         "store": not self.config.zero_data_retention,
-                        "safety_settings": safety_cfg,
+                        "safety_settings": self.get_interactions_safety_settings(),
                     }
                     if previous_interaction_id:
                         kwargs["previous_interaction_id"] = previous_interaction_id
@@ -348,7 +369,7 @@ class GeminiModelRouter:
                         kwargs["response_format"] = {
                             "type": "text",
                             "mime_type": "application/json",
-                            "json_schema": response_schema,
+                            "schema": response_schema,
                         }
                     try:
                         raw_res = self._client.interactions.create(**kwargs)
@@ -398,7 +419,11 @@ class GeminiModelRouter:
                     interaction_id=f"{interaction_id}_err",
                 )
                 self.telemetry_log.append(telemetry)
-                return {"status": "provider_error", "error": str(exc)}, telemetry
+                failure: dict[str, Any] = {"status": "provider_error", "error": str(exc)}
+                provider_http_status = self._provider_http_status(exc)
+                if provider_http_status is not None:
+                    failure["provider_http_status"] = provider_http_status
+                return failure, telemetry
 
         telemetry = ModelCallTelemetry(
             model=model_id,
