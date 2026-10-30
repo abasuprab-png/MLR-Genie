@@ -79,6 +79,11 @@ jobs:
           python -m pip install '.[dev]'
           npm ci
 
+      - name: Verify bootstrap without runtime-role membership
+        env:
+          MLR_GENIE_TEST_BOOTSTRAP_POSTGRES_URL: postgresql://mlr_genie_test:ephemeral-ci-test-only@127.0.0.1:5432/mlr_genie
+        run: python -m pytest tests/test_postgres_bootstrap.py -q
+
       - name: Bootstrap the isolated PostgreSQL test schema
         env:
           MLR_GENIE_TEST_POSTGRES_URL: postgresql://mlr_genie_test:ephemeral-ci-test-only@127.0.0.1:5432/mlr_genie

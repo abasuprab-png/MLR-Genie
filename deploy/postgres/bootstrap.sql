@@ -17,6 +17,6 @@ END $$;
 
 BEGIN;
 GRANT CONNECT ON DATABASE mlr_genie TO :"runtime_role";
-CREATE SCHEMA IF NOT EXISTS mlr_genie AUTHORIZATION :"runtime_role";
+CREATE SCHEMA IF NOT EXISTS mlr_genie;
 GRANT USAGE, CREATE ON SCHEMA mlr_genie TO :"runtime_role";
 COMMIT;
