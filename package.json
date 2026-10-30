@@ -1,0 +1,27 @@
+{
+  "name": "mlr-genie-gcp-adk",
+  "version": "3.0.0",
+  "private": true,
+  "type": "module",
+  "description": "MLR Genie (Version 3) — Agent-first workspace for Pharma, Biotech & MedTech communications teams on GCP, Google ADK, and Gemini 4.0 / 3.8",
+  "scripts": {
+    "dev": "vite",
+    "check": "tsc --noEmit",
+    "client:check": "tsc --noEmit -p tsconfig.client.json",
+    "client:build": "vite build",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.5.0",
+    "@types/react": "^18.3.5",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.1",
+    "typescript": "^5.5.4",
+    "vite": "^5.4.2",
+    "vitest": "^2.0.5"
+  }
+}

@@ -1,0 +1,15 @@
+/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+  from starlette.testclient import TestClient as TestClient  # noqa
+population [('supported', 'Within Approved Meaning (Ready for MLR Review).', 'Authorized study population', 'Protocol observation period')]
+direction [('supported', 'Within Approved Meaning (Ready for MLR Review).', 'Authorized study population', 'Protocol observation period')]
+time_unit [('supported', 'Within Approved Meaning (Ready for MLR Review).', 'Authorized study population', '24 months')]
+number_role [('supported', 'Within Approved Meaning (Ready for MLR Review).', 'Authorized study population', 'Protocol observation period')]
+stale [('supported', 'Within Approved Meaning (Ready for MLR Review).', 'Authorized study population', 'Protocol observation period')]
+stale_after_apply 2 Aurenix worsened overall survival. [('Aurenix improved overall survival.', 'supported')]
+auth [(b'x-actor-id', b'impersonated-reviewer')] ('victim', 'impersonated-reviewer')
+auth [(b'authorization', b'nonsense')] ('victim', 'nonsense')
+auth [(b'x-tenant-id', b'victim')] ('victim', 'authenticated-user')
+API_CROSS_TENANT_WITHOUT_CREDENTIAL {'X-Actor-Id': 'attacker'} 200 victim
+API_CROSS_TENANT_WITHOUT_CREDENTIAL {'Authorization': 'nonsense'} 200 victim
+acceptance 12 12
+scenario 15 15

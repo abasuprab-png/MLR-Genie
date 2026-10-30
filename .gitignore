@@ -1,0 +1,15 @@
+node_modules/
+dist/
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+*.db
+*.sqlite3
+.env
+.DS_Store
+artifacts/file_roundtrip/*
+!artifacts/file_roundtrip/job_demo_aurenix_round_1/
+mlr-genie-independent-review-handoff.zip
+mlr-genie-v3-phase3-project.zip
+
