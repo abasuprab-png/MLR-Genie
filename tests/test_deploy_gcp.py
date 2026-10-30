@@ -30,6 +30,7 @@ def test_target_preserves_identity_and_uses_private_state_name():
     assert str(target.project_number) == "333570013714"
     assert target.region == "us-central1"
     assert target.inference_location == "us-central1"
+    assert target.allow_global_inference is False
     assert target.public_host == ""
     assert target.state_bucket == "mlr-genie-tfstate-333570013714"
 
@@ -54,10 +55,26 @@ def test_inference_location_is_separate_from_resource_region(location):
     assert target.region == "us-central1"
 
 
-@pytest.mark.parametrize("location", ["global", "US", "us/other", "https://example.com", "other"])
+@pytest.mark.parametrize("location", ["US", "us/other", "https://example.com", "other"])
 def test_inference_location_rejects_global_and_non_location_values(location):
-    with pytest.raises(ValueError, match="global inference is not permitted"):
+    with pytest.raises(ValueError, match="vertex_ai_location must"):
         _driver.Target.from_dict(target_data(vertex_ai_location=location))
+
+
+def test_global_inference_requires_explicit_approval_and_preserves_resource_region(tmp_path):
+    with pytest.raises(ValueError, match="requires explicit allow_global_inference=true"):
+        _driver.Target.from_dict(target_data(vertex_ai_location="global"))
+    target = _driver.Target.from_dict(target_data(vertex_ai_location="global", allow_global_inference=True))
+    assert target.inference_location == "global" and target.region == "us-central1"
+    current = _driver.Deployment(target, tmp_path, tmp_path / "evidence", runner=FakeRunner(lambda *args: None))
+    assert current.report["allow_global_inference"] is True
+    assert current.report["vertex_ai_location"] == "global"
+
+
+@pytest.mark.parametrize("value", [None, "true", "false", 0, 1, [], {}])
+def test_global_inference_approval_requires_a_strict_json_boolean(value):
+    with pytest.raises(ValueError, match="must be a JSON boolean"):
+        _driver.Target.from_dict(target_data(vertex_ai_location="global", allow_global_inference=value))
 
 
 def test_project_guard_requires_exact_id_number_and_active_state():
@@ -707,7 +724,7 @@ def test_direct_cloud_run_network_error_cannot_count_as_ingress_rejection(tmp_pa
 
 
 def runtime_probe_deployment(tmp_path, *, result_changes=None, identity=None, execution_error=False, cleanup_error=False,
-                             inference_location=None):
+                             inference_location=None, allow_global_inference=False):
     observed = {}
     probe_result = {
         "project_id": "commsrx-ai", "location": inference_location or "us-central1", "model": "gemini-3.5-flash-lite",
@@ -752,7 +769,8 @@ def runtime_probe_deployment(tmp_path, *, result_changes=None, identity=None, ex
             return completed(args)
         raise AssertionError(args)
 
-    current = deployment(tmp_path, FakeRunner(handler), vertex_ai_location=inference_location or "")
+    current = deployment(tmp_path, FakeRunner(handler), vertex_ai_location=inference_location or "",
+                         allow_global_inference=allow_global_inference)
     current.report.update(commit="e" * 40, image="us-central1-docker.pkg.dev/commsrx-ai/mlr-genie/app@sha256:" + "a" * 64)
     source = tmp_path / "deploy/automation/vertex_probe.py"
     source.parent.mkdir(parents=True)
@@ -788,6 +806,24 @@ def test_us_geography_probe_keeps_job_and_storage_in_deployment_region(tmp_path)
     assert current.report["region"] == "us-central1"
     assert current.report["vertex_ai_location"] == "us"
     assert current.report["vertex_probe"]["location"] == "us"
+
+
+def test_explicit_global_approval_is_forwarded_only_to_global_probe(tmp_path):
+    current, workspace, observed = runtime_probe_deployment(
+        tmp_path, inference_location="global", allow_global_inference=True,
+    )
+    current.vertex_probe(workspace)
+    assert observed["env"]["GOOGLE_CLOUD_LOCATION"] == "global"
+    assert observed["env"]["MLR_VERTEX_PROBE_ALLOW_GLOBAL"] == "true"
+    assert observed["flags"]["--region"] == "us-central1"
+
+
+def test_global_approval_does_not_enable_global_probe_for_us_inference(tmp_path):
+    current, workspace, observed = runtime_probe_deployment(
+        tmp_path, inference_location="us", allow_global_inference=True,
+    )
+    current.vertex_probe(workspace)
+    assert "MLR_VERTEX_PROBE_ALLOW_GLOBAL" not in observed["env"]
 
 
 def test_provider_probe_failure_preserves_diagnostic_and_still_removes_temporary_resources(tmp_path):

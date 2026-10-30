@@ -49,11 +49,18 @@ def sanitize_error(value: Any) -> str:
     return message[:MAX_ERROR_LENGTH]
 
 
+def validate_inference_location(location: str) -> None:
+    if location == "global":
+        if os.getenv("MLR_VERTEX_PROBE_ALLOW_GLOBAL") != "true":
+            raise ValueError("Global probe inference requires explicit MLR_VERTEX_PROBE_ALLOW_GLOBAL=true.")
+    elif location not in {"us", "eu"} and not re.fullmatch(r"[a-z]+-[a-z]+[0-9]", location):
+        raise ValueError("Probe requires us, eu, global with explicit approval, or a regional location.")
+
+
 def validate_target(project_id: str, location: str, bucket: str, object_name: str) -> None:
     if project_id != PROJECT_ID:
         raise ValueError("Probe project must match the authorized deployment project.")
-    if location not in {"us", "eu"} and not re.fullmatch(r"[a-z]+-[a-z]+[0-9]", location):
-        raise ValueError("Probe requires us, eu, or a regional location; global inference is not permitted.")
+    validate_inference_location(location)
     if bucket != f"{PROJECT_ID}-mlr-versioned-artifacts":
         raise ValueError("Probe destination must be the deployment's private artifact bucket.")
     if (not object_name.startswith("deployment-probes/") or len(object_name) > 1024
@@ -63,6 +70,7 @@ def validate_target(project_id: str, location: str, bucket: str, object_name: st
 
 
 def collect_probe(project_id: str, location: str, *, router_factory=GeminiModelRouter) -> dict:
+    validate_inference_location(location)
     config = GcpAgentConfig(
         project_id=project_id, location=location, use_vertex_ai=True,
         gemini_api_key=None, zero_data_retention=True,

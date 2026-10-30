@@ -86,11 +86,23 @@ bootstraps the SQL schema through a temporary narrowly scoped import grant.
 It never resets an administrator password or substitutes fake Veeva credentials.
 
 The target separates the application's GCP `region` from `vertex_ai_location`.
-Cloud Run, PostgreSQL, and artifact storage stay in `us-central1`; Vertex uses
-the `us` endpoint because Interactions supports the US and EU geographies rather
-than individual regions. This target keeps inference in the US and does not
-enable global processing. The runtime probe verifies the deployed inference
-location independently of the job's regional execution location.
+The candidate in this branch proposes `vertex_ai_location=global` with
+`allow_global_inference=true` because the configured deep model was not available
+through the US endpoint. It is a reviewable proposal awaiting an explicit user
+choice; it has not been deployed. Global Gemini processing does **not** provide a
+US-jurisdiction ML processing guarantee. Submitted documents and prompts may be
+processed outside the US even though Cloud Run, Cloud SQL, GCS artifacts, and
+secrets remain in `us-central1`.
+
+`allow_global_inference` defaults to `false` and accepts only a JSON boolean.
+The driver rejects `global` without explicit opt-in, writes the decision into
+deployment evidence and Terraform variables, and passes the probe's separate
+`MLR_VERTEX_PROBE_ALLOW_GLOBAL=true` flag only for an approved global target.
+Terraform independently requires the opt-in before creating or updating Cloud
+Run for global inference. The runtime probe verifies the deployed inference
+location independently of the job's regional execution location. Model IDs and
+CAMS/CommsRx request and response shapes remain unchanged. Keep this candidate
+out of `master` and `deploy/production` until the user chooses global processing.
 
 The `mlr-genie/public-ip` GitHub commit status publishes the IP as soon as it is
 allocated, before the workflow waits for Cloudflare DNS and Google-managed TLS.

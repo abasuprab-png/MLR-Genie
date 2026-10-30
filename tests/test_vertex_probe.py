@@ -98,7 +98,8 @@ def test_untrusted_status_values_are_not_persisted(status):
     {"bucket": "other-bucket"}, {"object_name": "other-prefix/result.json"},
     {"object_name": "deployment-probes/../result.json"},
 ])
-def test_probe_refuses_cross_project_global_or_unscoped_destinations(changes):
+def test_probe_refuses_cross_project_global_or_unscoped_destinations(changes, monkeypatch):
+    monkeypatch.delenv("MLR_VERTEX_PROBE_ALLOW_GLOBAL", raising=False)
     values = {
         "project_id": "commsrx-ai", "location": "us-central1",
         "bucket": "commsrx-ai-mlr-versioned-artifacts", "object_name": "deployment-probes/run-123/result.json",
@@ -160,6 +161,23 @@ def test_main_uploads_diagnostic_without_printing_provider_error(monkeypatch, ca
 
 def test_main_rejects_global_before_probe_or_upload(monkeypatch, capsys):
     set_target(monkeypatch, GOOGLE_CLOUD_LOCATION="global")
+    monkeypatch.delenv("MLR_VERTEX_PROBE_ALLOW_GLOBAL", raising=False)
     monkeypatch.setattr(probe, "collect_probe", lambda *args: pytest.fail("Must not call a global model"))
     assert probe.main() == 1
     assert "configuration is invalid" in capsys.readouterr().err
+
+
+def test_global_probe_is_allowed_only_by_explicit_environment_approval(monkeypatch):
+    monkeypatch.setenv("MLR_VERTEX_PROBE_ALLOW_GLOBAL", "true")
+    probe.validate_target("commsrx-ai", "global", "commsrx-ai-mlr-versioned-artifacts", "deployment-probes/test.json")
+    result = probe.collect_probe("commsrx-ai", "global", router_factory=fake_factory(
+        {"status": "unresolved"}, expected_location="global",
+    ))
+    assert result["status"] == "passed" and result["location"] == "global"
+
+
+@pytest.mark.parametrize("value", ["false", "1", "yes", "TRUE", ""])
+def test_global_probe_rejects_truthy_or_implicit_environment_values(monkeypatch, value):
+    monkeypatch.setenv("MLR_VERTEX_PROBE_ALLOW_GLOBAL", value)
+    with pytest.raises(ValueError, match="requires explicit"):
+        probe.collect_probe("commsrx-ai", "global", router_factory=lambda *args: pytest.fail("No global call allowed"))
