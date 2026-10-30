@@ -49,7 +49,7 @@ BOOTSTRAP_TARGETS = (
 )
 PAPER_URL = "https://journals.plos.org/plosmedicine/article/file?id=10.1371/journal.pmed.0020124&type=printable"
 PAPER_SHA256 = "ffc1005680cb620eec4c913437dfabbf311b535cfe16cbaeb2faec1f92afc362"
-PAPER_CLAIM = "Within the paper’s framework, research findings are less likely to be true in fields where studies are smaller."
+PAPER_CLAIM = "The paper associates larger study samples with higher statistical power and a higher positive predictive value, holding other factors equal."
 
 
 @dataclass(frozen=True)
