@@ -122,7 +122,8 @@ probes Vertex with fixed public synthetic text under the application's runtime
 identity. Its bounded, redacted diagnostic helps distinguish provider rejection
 from application failures; it does not read documents or authentication secrets.
 The temporary job and exact GCS object generation are removed after collection.
-The workflow retains only six
+The fixed public journal-intake case is also probed with the production safety
+schema and instruction before posting the journal PDF. The workflow retains only seven
 explicitly allowlisted sanitized reports; credentials, Terraform state, raw
 plans, and raw command logs are excluded. Missing access, DNS, model availability,
 or failed checks produce a failed stage rather than a deployment-success claim.
