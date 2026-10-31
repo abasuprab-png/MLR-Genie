@@ -6,6 +6,12 @@ on:
   push:
     branches:
       - deploy/production
+    paths-ignore:
+      - '.github/workflows/deploy-gcp.yml'
+      - '.github/workflows/journal-acceptance.yml'
+      - 'deploy/automation/journal_acceptance.py'
+      - 'evals/live_journal_verification.py'
+      - 'tests/test_live_journal_verification.py'
   workflow_dispatch:
 
 permissions:
