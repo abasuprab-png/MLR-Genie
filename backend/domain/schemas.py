@@ -117,6 +117,7 @@ class ClaimVerificationVerdict(BaseModel):
     population_match: bool
     endpoint_match: bool
     verbatim_quote: str
+    source_passage_id: str = Field(description="Exact passage_id of the selected authorized_source_passages entry; empty if none supports the claim.")
     page_number: int
     box_2d: list[int]
     numeric_values_matched: list[str]
@@ -147,6 +148,7 @@ class ClaimVerificationVerdict(BaseModel):
                 "magnitude",
                 "timeframe",
                 "verbatim_quote",
+                "source_passage_id",
             ):
                 if out.get(str_field) is None:
                     out[str_field] = ""
