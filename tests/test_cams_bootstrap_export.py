@@ -46,7 +46,7 @@ class BootstrapExportTests(unittest.TestCase):
             "actor_id": "227769156", "repository_owner_id": "227769156", "repository_id": "1423359597",
             "repository": export.RECEIVER_REPOSITORY,
             "workflow_ref": export.RECEIVER_REPOSITORY + "/.github/workflows/configure-mlr-genie.yml@refs/heads/main",
-            "sub": "repo:" + export.RECEIVER_REPOSITORY + ":ref:refs/heads/main",
+            "sub": "repo:abasuprab-png@227769156/CAMS-Onramp-for-CommsRx-App@1423359597:ref:refs/heads/main",
             "iat": int(self.now.timestamp()), "nbf": int(self.now.timestamp()) - 1,
             "exp": int(self.now.timestamp()) + 300, "iss": export.ISSUER,
             "aud": export.AUDIENCE_PREFIX + hashlib.sha256(export.canonical_label(self.request)).hexdigest(),
@@ -71,6 +71,7 @@ class BootstrapExportTests(unittest.TestCase):
         for key, changed in {
             "ref": "refs/heads/untrusted", "sha": "b" * 40, "event_name": "pull_request",
             "workflow_ref": "other/workflow", "actor_id": "1", "repository": "other/repo",
+            "sub": "repo:abasuprab-png@1/CAMS-Onramp-for-CommsRx-App@1423359597:ref:refs/heads/main",
         }.items():
             with self.subTest(key=key), self.assertRaises(ValueError):
                 export.validate_receiver(self.payload, {**self.claims, key: changed}, self.now)
