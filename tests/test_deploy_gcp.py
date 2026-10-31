@@ -892,6 +892,33 @@ def test_unknown_probe_case_is_refused_before_cloud_access(tmp_path):
     assert not current.runner.calls
 
 
+def test_journal_failure_retains_public_diagnostic_and_redacts_credentials(tmp_path, monkeypatch):
+    import hashlib
+    import httpx
+    data = b"fixed-public-fixture"
+    monkeypatch.setattr(_driver, "PAPER_SHA256", hashlib.sha256(data).hexdigest())
+    original_client = httpx.Client
+    monkeypatch.setattr(httpx, "Client", lambda **kwargs: original_client(
+        **kwargs, transport=httpx.MockTransport(lambda request: httpx.Response(200, content=data)),
+    ))
+
+    def handler(args, kwargs):
+        assert args[1] == "evals/live_journal_verification.py"
+        report_dir = Path(args[args.index("--report-dir") + 1])
+        report_dir.mkdir(parents=True)
+        (report_dir / "diagnostic.json").write_text(json.dumps({"verdict": "insufficient", "diagnosis": "test-secret"}))
+        raise _driver.DeploymentError("Anchor validation failed")
+
+    current = deployment(tmp_path, FakeRunner(handler))
+    current.report["public_url"] = "https://mlr.example.com"
+    current.sanitizer.add_secret("test-secret")
+    with pytest.raises(_driver.DeploymentError, match="Anchor validation failed"):
+        current.journal_eval("test-secret", tmp_path)
+    diagnostic = (tmp_path / "evidence/journal/diagnostic.json").read_text()
+    assert '"verdict": "insufficient"' in diagnostic
+    assert "test-secret" not in diagnostic and "[REDACTED]" in diagnostic
+
+
 @pytest.mark.parametrize("commit,state", [("not-a-sha", "pending"), ("e" * 40, "error")])
 def test_public_ip_status_rejects_invalid_commit_or_state_before_network(tmp_path, monkeypatch, commit, state):
     current = public_ip_deployment(tmp_path, monkeypatch)

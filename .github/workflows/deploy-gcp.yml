@@ -165,6 +165,7 @@ jobs:
             deployment-output/journal-intake-probe.json
             deployment-output/integrations.json
             deployment-output/journal/result.json
+            deployment-output/journal/diagnostic.json
             deployment-output/persistence.json
           if-no-files-found: ignore
           retention-days: 14
