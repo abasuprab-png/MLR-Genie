@@ -110,9 +110,9 @@ def test_coverage_does_not_borrow_terms_from_an_unmatched_source(offline_router)
 def test_live_verdict_is_not_downgraded_by_offline_token_coverage(offline_router):
     offline_router._client = MagicMock()
     offline_router._client.models.generate_content.return_value = SimpleNamespace(
-        text='{"status": "supported"}', id="verified_live"
+        text='{"status": "supported", "verbatim_quote": "Signal texture.", "page_number": 1}', id="verified_live"
     )
-    result = assess("Signal novel mechanism benefit.", {"verbatim_text": "Signal texture."}, offline_router)
+    result = assess("Signal novel mechanism benefit.", {"verbatim_text": "Signal texture.", "bbox": {"page": 1}}, offline_router)
     assert result.support_status == SupportClassification.SUPPORTED
     assert offline_router.telemetry_log[-1].used_live_sdk is True
 
