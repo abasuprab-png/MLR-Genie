@@ -1,0 +1,56 @@
+name: Seal MLR bootstrap for the CAMS Azure receiver
+run-name: CAMS bootstrap transfer · ${{ github.run_id }}
+on:
+  workflow_dispatch:
+    inputs:
+      receiver_bundle_base64:
+        description: Base64 ZIP of the CAMS receiver's public request, public key and signed GitHub attestation
+        required: true
+        type: string
+permissions:
+  contents: read
+  id-token: write
+jobs:
+  seal:
+    if: >-
+      github.repository_id == '1439565611' && github.repository_owner_id == '227769156' &&
+      github.actor_id == '227769156' && github.ref == 'refs/heads/deploy/production' &&
+      github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out the reviewed operation
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Check the encrypted transfer contract
+        run: |
+          python -m pip install PyJWT==2.15.1 cryptography==50.0.2
+          python -m unittest discover -s tests -p test_cams_bootstrap_export.py
+      - name: Authenticate with the existing Google deployment identity
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093
+        with:
+          project_id: commsrx-ai
+          workload_identity_provider: projects/333570013714/locations/global/workloadIdentityPools/mlr-genie-github/providers/github
+          service_account: mlr-genie-deployer@commsrx-ai.iam.gserviceaccount.com
+          create_credentials_file: true
+          export_environment_variables: true
+          cleanup_credentials: true
+      - name: Set up Google Cloud SDK
+        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db
+        with:
+          version: '591.0.0'
+          project_id: commsrx-ai
+      - name: Encrypt only the authorized bootstrap secret
+        id: seal
+        env:
+          RECEIVER_BUNDLE_BASE64: ${{ inputs.receiver_bundle_base64 }}
+        run: python deploy/automation/export_cams_bootstrap.py
+      - name: Publish ciphertext only
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: mlr-bootstrap-sealed-${{ steps.seal.outputs.receiver_run }}
+          path: bridge-transfer-output/sealed.json
+          retention-days: 1
+          if-no-files-found: error
