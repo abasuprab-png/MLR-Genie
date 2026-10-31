@@ -57,7 +57,8 @@ class ModelCallTelemetry(BaseModel):
 class GeminiModelRouter:
     """
     Routes MLR Genie tasks to the optimal Gemini model via either:
-    - Google GenAI Interactions API (`client.interactions.create`) on Vertex AI / Gemini Enterprise Agent Platform
+    - Stateless GenerateContent on Vertex AI US/EU multi-region endpoints
+    - Google GenAI Interactions API (`client.interactions.create`) on other Vertex endpoints
     - Gemini Developer API (`client.models.generate_content`) when in `api_key` mode or when `interactions` is absent.
     """
 
@@ -154,10 +155,16 @@ class GeminiModelRouter:
         """
         Determines whether to invoke `self._client.models.generate_content` (Gemini Developer API
         `api_key` mode or client without `interactions`) vs `self._client.interactions.create`
-        (Vertex AI / Enterprise Agent Platform).
+        (other Vertex AI / Enterprise Agent Platform locations). US/EU use
+        GenerateContent to avoid the preview Interactions session storage.
         """
         if self._client is None:
             return False
+        # Multi-region processing must use GenerateContent. The preview
+        # Interactions API makes no session-storage residency commitment.
+        # This applies to every call, including retries, without global fallback.
+        if self.config.use_vertex_ai and self.config.location in {"us", "eu"}:
+            return True
         mock_children = getattr(self._client, "_mock_children", None)
         if isinstance(mock_children, dict):
             if "models" in mock_children and "interactions" not in mock_children:
@@ -176,7 +183,6 @@ class GeminiModelRouter:
         return False
 
     LIVE_SDK_MODEL_MAP: dict[str, str] = {
-        "gemini-4-argon": "gemini-3.1-pro-preview",
         "gemini-3.8-flash": "gemini-3.8-flash",
         "gemini-3.5-flash-lite": "gemini-3.5-flash-lite",
         "gemini-embedding-2": "gemini-embedding-001",

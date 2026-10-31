@@ -29,7 +29,7 @@ def fake_factory(payload, *, live=True, calls=None, expected_location="us-centra
                 calls.append(kwargs)
             return payload, SimpleNamespace(
                 model="gemini-3.5-flash-lite" if kwargs["task_type"] == "cv08_pv_gate" else "gemini-4-argon",
-                effective_model="gemini-3.5-flash-lite" if kwargs["task_type"] == "cv08_pv_gate" else "gemini-3.1-pro-preview",
+                effective_model="gemini-3.5-flash-lite" if kwargs["task_type"] == "cv08_pv_gate" else "gemini-4-argon",
                 used_live_sdk=live,
             )
         return SimpleNamespace(create_interaction=create_interaction)
@@ -41,7 +41,7 @@ def test_probe_uses_only_constant_synthetic_input_and_a_closed_result_schema():
     result = probe.collect_probe("commsrx-ai", "us-central1", router_factory=fake_factory({"status": "unresolved"}, calls=calls))
     assert result == {
         "project_id": "commsrx-ai", "location": "us-central1", "model": "gemini-4-argon",
-        "effective_model": "gemini-3.1-pro-preview", "used_live_sdk": True, "status": "passed",
+        "effective_model": "gemini-4-argon", "used_live_sdk": True, "status": "passed",
         "provider_http_status": None, "error_message": "",
     }
     assert len(calls) == 1

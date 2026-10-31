@@ -116,7 +116,8 @@ def test_installed_developer_sdk_retains_generate_content_safety_and_schema():
 
 
 @pytest.mark.parametrize("location,expected_url", [
-    ("us", "https://aiplatform.us.rep.googleapis.com/v1beta1/projects/commsrx-ai/locations/us/interactions"),
+    ("us", "https://aiplatform.us.rep.googleapis.com/v1beta1/projects/commsrx-ai/locations/us/publishers/google/models/gemini-3.5-flash-lite:generateContent"),
+    ("eu", "https://aiplatform.eu.rep.googleapis.com/v1beta1/projects/commsrx-ai/locations/eu/publishers/google/models/gemini-3.5-flash-lite:generateContent"),
     ("global", "https://aiplatform.googleapis.com/v1beta1/projects/commsrx-ai/locations/global/interactions"),
 ])
 def test_installed_vertex_sdk_uses_configured_geography_endpoint(location, expected_url):
@@ -124,6 +125,10 @@ def test_installed_vertex_sdk_uses_configured_geography_endpoint(location, expec
 
     def handler(request):
         calls.append(request)
+        if location in {"us", "eu"}:
+            return httpx.Response(200, json={
+                "candidates": [{"content": {"role": "model", "parts": [{"text": '{"claims": [], "safety_findings": []}'}]}}],
+            })
         return httpx.Response(200, json={
             "id": "synthetic-us-interaction", "object": "interaction", "status": "completed",
             "steps": [{"type": "model_output", "content": [{"type": "text", "text": '{"claims": [], "safety_findings": []}'}]}],
@@ -136,14 +141,19 @@ def test_installed_vertex_sdk_uses_configured_geography_endpoint(location, expec
         assert telemetry.used_live_sdk
         assert len(calls) == 1
         assert str(calls[0].url) == expected_url
-        if location == "us":
+        if location in {"us", "eu"}:
             assert "global" not in str(calls[0].url)
+            assert telemetry.transport_mode == "generate_content"
+            body = json.loads(calls[0].content)
+            assert body["safetySettings"] == router.get_clinical_safety_settings()
+            assert body["generationConfig"]["responseJsonSchema"] == IntakeAssessment.model_json_schema()
     finally:
         router._client.close()
 
 
 @pytest.mark.parametrize("status", [403, 404, 429])
-def test_provider_http_status_reaches_safe_gateway_diagnostic_without_error_body(status):
+@pytest.mark.parametrize("location", ["us-central1", "us"])
+def test_provider_http_status_reaches_safe_gateway_diagnostic_without_error_body(status, location):
     calls = []
 
     def handler(request):
@@ -152,14 +162,51 @@ def test_provider_http_status_reaches_safe_gateway_diagnostic_without_error_body
             "code": status, "message": "private synthetic provider body must not be disclosed", "status": "ERROR",
         }})
 
-    router = sdk_router(handler)
+    router = sdk_router(handler, location=location)
     try:
         with pytest.raises(ModelAssessmentError) as caught:
             assess(router)
         assert f"provider HTTP {status}" in str(caught.value)
         assert "private synthetic provider body" not in str(caught.value)
         assert calls
+        if location == "us":
+            assert len(calls) == 1
+            assert calls[0].url.host == "aiplatform.us.rep.googleapis.com"
         assert router.telemetry_log[-1].used_live_sdk is False
+    finally:
+        router._client.close()
+
+
+def test_us_deep_model_and_cache_retry_keep_argon_on_us_generate_content():
+    calls = []
+
+    def handler(request):
+        calls.append(request)
+        if len(calls) == 1:
+            return httpx.Response(404, json={"error": {"code": 404, "message": "Expired cache"}})
+        return httpx.Response(200, json={
+            "candidates": [{"content": {"role": "model", "parts": [{"text": '{"status":"supported"}'}]}}],
+        })
+
+    router = sdk_router(handler, location="us")
+    try:
+        payload, telemetry = router.create_interaction(
+            task_type="claim_verification", prompt="Synthetic claim and source.",
+            system_instruction="Verify the supplied evidence.",
+            response_schema={"type": "object", "properties": {"status": {"type": "string"}}},
+            cached_content="projects/commsrx-ai/locations/us/cachedContents/expired",
+        )
+        assert payload == {"status": "supported"}
+        assert telemetry.used_live_sdk and telemetry.transport_mode == "generate_content"
+        assert telemetry.effective_model == telemetry.model == "gemini-4-argon"
+        assert telemetry.cached_content is None
+        assert len(calls) == 2
+        for request in calls:
+            assert str(request.url) == (
+                "https://aiplatform.us.rep.googleapis.com/v1beta1/projects/commsrx-ai/"
+                "locations/us/publishers/google/models/gemini-4-argon:generateContent"
+            )
+        assert "cachedContent" not in json.loads(calls[1].content)
     finally:
         router._client.close()
 
