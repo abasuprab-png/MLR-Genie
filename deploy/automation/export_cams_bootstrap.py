@@ -53,7 +53,7 @@ def validate_receiver(payload: dict, claims: dict, now: datetime) -> tuple[dict,
         "event_name": "workflow_dispatch", "actor_id": "227769156", "repository_owner_id": "227769156",
         "repository_id": "1423359597", "repository": RECEIVER_REPOSITORY,
         "workflow_ref": RECEIVER_REPOSITORY + "/.github/workflows/configure-mlr-genie.yml@refs/heads/main",
-        "sub": "repo:" + RECEIVER_REPOSITORY + ":ref:refs/heads/main",
+        "sub": "repo:abasuprab-png@227769156/CAMS-Onramp-for-CommsRx-App@1423359597:ref:refs/heads/main",
     }
     if any(claims.get(key) != value for key, value in expected.items()):
         raise ValueError("The signed GitHub identity does not match the authorized CAMS receiver.")
