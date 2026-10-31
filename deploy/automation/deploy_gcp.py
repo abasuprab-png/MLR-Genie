@@ -735,6 +735,8 @@ class Deployment:
         report_dir = workspace / "journal-evaluation"
         self.runner.run([sys.executable, "evals/live_journal_verification.py", "--base-url", self.report["public_url"],
                          "--reference-pdf", str(pdf_path), "--claim", PAPER_CLAIM,
+                         "--expected-quote-substring", "Small sample size means smaller power",
+                         "--expected-quote-substring", "other factors being equal",
                          "--source-url", "https://pubmed.ncbi.nlm.nih.gov/16060722/", "--report-dir", str(report_dir)],
                         env={**os.environ, "MLR_GENIE_BOOTSTRAP_SECRET": bootstrap}, timeout=900)
         self.write("journal/result.json", json.loads((report_dir / "result.json").read_text()))

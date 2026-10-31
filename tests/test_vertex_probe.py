@@ -153,6 +153,7 @@ def set_target(monkeypatch, **changes):
 
 def test_main_uploads_diagnostic_without_printing_provider_error(monkeypatch, capsys):
     set_target(monkeypatch)
+    monkeypatch.setenv("GOOGLE_GENAI_LIVE_VERTEX", "false")
     monkeypatch.setattr(probe, "collect_probe", lambda *args: {"status": "provider_error", "error_message": "private synthetic detail"})
     uploads = []
     monkeypatch.setattr(probe, "write_result", lambda *args: uploads.append(args))

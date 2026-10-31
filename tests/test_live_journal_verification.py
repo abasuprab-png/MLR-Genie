@@ -30,6 +30,13 @@ def test_anchor_is_independently_verified_against_uploaded_pdf(anchored_pdf):
     }
 
 
+def test_geometrically_valid_but_unrelated_citation_fails_the_known_passage_check(anchored_pdf):
+    content, result = anchored_pdf
+    with pytest.raises(ValueError, match="expected supporting passage"):
+        verify_pdf_anchor(content, result, expected_quote_substrings=["Small sample size means smaller power"])
+    verify_pdf_anchor(content, result, expected_quote_substrings=["findings show a consistent signal"])
+
+
 @pytest.mark.parametrize("changed", ["quote", "rectangle", "page", "dimensions", "nan", "verdict"])
 def test_false_or_inconsistent_service_anchor_is_refused(anchored_pdf, changed):
     content, original = anchored_pdf

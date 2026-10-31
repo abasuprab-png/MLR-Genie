@@ -38,6 +38,8 @@ def parse_args(argv=None):
     parser.add_argument("--reference-pdf", required=True, type=Path)
     parser.add_argument("--claim", required=True, help="A reworded claim supported by the supplied journal PDF.")
     parser.add_argument("--source-url", required=True, help="Public bibliographic URL; recorded as attribution, never fetched.")
+    parser.add_argument("--expected-quote-substring", action="append", default=[],
+                        help="Known source passage text that the returned citation must contain; repeat for multiple checks.")
     parser.add_argument("--base-url", default=os.getenv("MLR_INTEGRATION_BASE_URL"),
                         help="Existing HTTPS service; otherwise start an isolated local hosted server.")
     parser.add_argument("--report-dir", type=Path, help="Output directory; defaults to a new temporary directory.")
@@ -55,7 +57,7 @@ def parse_args(argv=None):
     return args
 
 
-def verify_pdf_anchor(pdf_bytes: bytes, result: dict) -> dict:
+def verify_pdf_anchor(pdf_bytes: bytes, result: dict, *, expected_quote_substrings=()) -> dict:
     """Re-extract the returned rectangle from the submitted PDF independently."""
     anchor = result.get("anchor", {})
     if anchor.get("verdict") != "supported" or result.get("coordinateSpace") != "pdf_points":
@@ -63,6 +65,8 @@ def verify_pdf_anchor(pdf_bytes: bytes, result: dict) -> dict:
     page_number, box, quote = anchor.get("page"), anchor.get("boundingBox"), anchor.get("verbatimQuote")
     if type(page_number) is not int or not isinstance(box, dict) or not isinstance(quote, str) or not quote.strip():
         raise ValueError("A page, bounding box, and verbatim quote are required.")
+    if any(" ".join(expected.split()) not in " ".join(quote.split()) for expected in expected_quote_substrings):
+        raise ValueError("The returned citation does not contain the expected supporting passage.")
     with pymupdf.open(stream=pdf_bytes, filetype="pdf") as pdf:
         if not 1 <= page_number <= len(pdf):
             raise ValueError("The returned PDF page is outside the submitted document.")
@@ -187,7 +191,9 @@ def run_evaluation(args) -> Path:
             if verified.status_code != 200:
                 raise RuntimeError(f"Journal verification returned {api_failure_summary(verified)}.")
             result = verified.json()
-        anchor_check = verify_pdf_anchor(pdf_bytes, result)
+        anchor_check = verify_pdf_anchor(pdf_bytes, result, expected_quote_substrings=args.expected_quote_substring)
+        if args.expected_quote_substring:
+            anchor_check["expected_supporting_passage_matched"] = True
         receipts = result.get("telemetry_receipts")
         if (not isinstance(receipts, list) or not receipts
                 or not all(receipt.get("used_live_sdk") is True
