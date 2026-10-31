@@ -19,6 +19,26 @@ import httpx
 import pymupdf
 
 
+PUBLIC_PAPER_SHA256 = "ffc1005680cb620eec4c913437dfabbf311b535cfe16cbaeb2faec1f92afc362"
+PUBLIC_PAPER_CLAIM = "The paper associates larger study samples with higher statistical power and a higher positive predictive value, holding other factors equal."
+
+
+def public_journal_diagnostic(pdf_bytes, claim, result, job_response, credentials):
+    """Only the fixed public acceptance fixture may produce detailed diagnostics."""
+    if hashlib.sha256(pdf_bytes).hexdigest() != PUBLIC_PAPER_SHA256 or claim != PUBLIC_PAPER_CLAIM:
+        return None
+    job = job_response.get("job", {}) if isinstance(job_response, dict) else {}
+    report = {"public_reference_sha256": PUBLIC_PAPER_SHA256, "result": result,
+              "claims": [{key: item.get(key) for key in (
+                  "support_status", "plain_english_diagnosis", "anchors", "missing_qualifiers", "numerical_mismatches",
+              )} for item in job.get("claims", [])]}
+    serialized = json.dumps(report, indent=2)
+    for value in credentials:
+        if value:
+            serialized = serialized.replace(value, "[REDACTED]")
+    return serialized + "\n"
+
+
 def _public_url(value: str, *, https_only: bool) -> str:
     try:
         parsed = urlsplit(value)
@@ -191,6 +211,16 @@ def run_evaluation(args) -> Path:
             if verified.status_code != 200:
                 raise RuntimeError(f"Journal verification returned {api_failure_summary(verified)}.")
             result = verified.json()
+            if (hashlib.sha256(pdf_bytes).hexdigest() == PUBLIC_PAPER_SHA256
+                    and args.claim == PUBLIC_PAPER_CLAIM):
+                job_response = client.get("/jobs/" + result["job_id"], headers={
+                    "Authorization": "Bearer " + token["access_token"],
+                })
+                diagnostic = public_journal_diagnostic(
+                    pdf_bytes, args.claim, result,
+                    job_response.json() if job_response.status_code == 200 else {}, credential_values,
+                )
+                (run / "diagnostic.json").write_text(diagnostic)
         anchor_check = verify_pdf_anchor(pdf_bytes, result, expected_quote_substrings=args.expected_quote_substring)
         if args.expected_quote_substring:
             anchor_check["expected_supporting_passage_matched"] = True

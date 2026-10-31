@@ -7,6 +7,34 @@ import httpx
 from evals.live_journal_verification import api_failure_summary, parse_args, verify_pdf_anchor
 
 
+def test_detailed_diagnostics_are_restricted_to_the_exact_public_fixture(monkeypatch):
+    import hashlib
+    from evals import live_journal_verification as journal
+    monkeypatch.setattr(journal, "PUBLIC_PAPER_SHA256", hashlib.sha256(b"public-pdf").hexdigest())
+    assert journal.public_journal_diagnostic(b"private-pdf", journal.PUBLIC_PAPER_CLAIM, {}, {}, []) is None
+    assert journal.public_journal_diagnostic(b"public-pdf", "private claim", {}, {}, []) is None
+    diagnostic = journal.public_journal_diagnostic(
+        b"public-pdf", journal.PUBLIC_PAPER_CLAIM,
+        {"anchor": {"verdict": "insufficient"}},
+        {"job": {"claims": [{"support_status": "unresolved", "plain_english_diagnosis": "token-secret"}],
+                 "private_metadata": "must-never-be-copied"}}, ["token-secret"],
+    )
+    assert '"verdict": "insufficient"' in diagnostic and "[REDACTED]" in diagnostic
+    assert "token-secret" not in diagnostic and "must-never-be-copied" not in diagnostic
+
+
+def test_focused_acceptance_refuses_non_us_target_before_cloud_access(monkeypatch):
+    from deploy.automation import journal_acceptance as acceptance
+    from deploy.automation.deploy_gcp import Target
+    monkeypatch.setattr(acceptance.Target, "from_dict", lambda value: Target(
+        project_id="commsrx-ai", project_number="333570013714", repo_full_name="abasuprab-png/MLR-Genie",
+        public_host="mlr-genie.signalfidelitygroup.com", vertex_ai_location="global", allow_global_inference=True,
+    ))
+    monkeypatch.setattr(acceptance, "Deployment", lambda *args: pytest.fail("No cloud access is allowed"))
+    with pytest.raises(ValueError, match="exact authorized US target"):
+        acceptance.main()
+
+
 @pytest.fixture
 def anchored_pdf():
     quote = "Journal findings show a consistent signal."
